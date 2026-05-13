@@ -4,7 +4,7 @@ import { runPopularityEngine } from "@/lib/popularityEngine";
 
 export async function POST() {
   const cookieStore = cookies();
-  const userId = cookieStore.get("plexmix_session")?.value;
+  const userId = cookieStore.get("mixarr_session")?.value;
 
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

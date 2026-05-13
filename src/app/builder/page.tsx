@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import axios from "axios";
-import { Plus, Trash2, Play, Upload, Star, Music, Shuffle } from "lucide-react";
+import { Plus, Trash2, Play, Upload, Star, Music, Shuffle, Activity } from "lucide-react";
 
 type Rule = {
   field: string;
@@ -53,6 +53,12 @@ export default function BuilderPage() {
         { field: "title", operator: "not_contains", value: "Holiday" }
       ]);
       setPlaylistName("No Holidays Allowed");
+    } else if (templateName === "workout") {
+      setRules([
+        { field: "tempo", operator: "gte", value: "120" },
+        { field: "energy", operator: "gte", value: "0.7" }
+      ]);
+      setPlaylistName("High BPM Workout Mix");
     }
   };
 
@@ -107,10 +113,11 @@ export default function BuilderPage() {
         <div className="glass-panel" style={{ padding: "1.5rem", borderRadius: "var(--radius-lg)" }}>
           <h3 style={{ margin: "0 0 1rem 0", fontSize: "1rem" }}>Quick Templates</h3>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
-            <button onClick={() => applyTemplate("deep_cuts")} style={btnStyle("var(--accent-blue)")}><Shuffle size={14}/> Deep Cuts</button>
-            <button onClick={() => applyTemplate("90s")} style={btnStyle("var(--accent-primary)")}><Music size={14}/> 90s Decade</button>
-            <button onClick={() => applyTemplate("christmas")} style={btnStyle("var(--accent-yellow)")}><Star size={14}/> Seasonal (Christmas)</button>
-            <button onClick={() => applyTemplate("anti_christmas")} style={btnStyle("var(--text-muted)")}>Anti-Seasonal Mix</button>
+            <button onClick={() => applyTemplate("deep_cuts")} style={btnStyle("var(--accent-blue)")}><Shuffle size={14} /> Deep Cuts</button>
+            <button onClick={() => applyTemplate("90s")} style={btnStyle("var(--accent-primary)")}><Music size={14} /> 90s Decade</button>
+            <button onClick={() => applyTemplate("workout")} style={btnStyle("var(--accent-primary)")}><Activity size={14} /> Workout (High BPM)</button>
+            <button onClick={() => applyTemplate("christmas")} style={btnStyle("var(--accent-yellow)")}><Star size={14} /> Seasonal</button>
+            <button onClick={() => applyTemplate("anti_christmas")} style={btnStyle("var(--text-muted)")}>Anti-Seasonal</button>
           </div>
         </div>
 
@@ -131,23 +138,23 @@ export default function BuilderPage() {
           <div style={{ display: "flex", flexDirection: "column", gap: "1rem", marginBottom: "2rem" }}>
             {rules.map((rule, i) => (
               <div key={i} className="rule-row">
-                <select 
-                  value={rule.field} 
+                <select
+                  value={rule.field}
                   onChange={(e) => updateRule(i, "field", e.target.value)}
                   style={inputStyle}
                 >
                   <option value="popularity">Popularity Score (0-100)</option>
                   <option value="energy">Energy (0.0-1.0)</option>
                   <option value="valence">Mood/Valence (0.0-1.0)</option>
-                  <option value="tempo">Tempo/BPM</option>
+                  <option value="tempo">BPM (Beats Per Minute) / Tempo</option>
                   <option value="year">Release Year</option>
                   <option value="genre">Genre Tag</option>
                   <option value="artist">Artist Name</option>
                   <option value="title">Track Title</option>
                 </select>
 
-                <select 
-                  value={rule.operator} 
+                <select
+                  value={rule.operator}
                   onChange={(e) => updateRule(i, "operator", e.target.value)}
                   style={inputStyle}
                 >
@@ -160,9 +167,9 @@ export default function BuilderPage() {
                   <option value="lte">Less or Equal (&le;)</option>
                 </select>
 
-                <input 
-                  type="text" 
-                  value={rule.value} 
+                <input
+                  type="text"
+                  value={rule.value}
                   onChange={(e) => updateRule(i, "value", e.target.value)}
                   placeholder="Value..."
                   style={{ ...inputStyle, flex: 1 }}
@@ -190,11 +197,11 @@ export default function BuilderPage() {
       {/* RIGHT COLUMN: PREVIEW */}
       <div className="glass-panel" style={{ flex: 1, display: "flex", flexDirection: "column", gap: "1rem", padding: "1.5rem", borderRadius: "var(--radius-lg)" }}>
         <h3 style={{ margin: "0 0 0.5rem 0", fontSize: "1.25rem" }}>Playlist Preview</h3>
-        
+
         <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
-          <input 
-            type="text" 
-            placeholder="Name your playlist..." 
+          <input
+            type="text"
+            placeholder="Name your playlist..."
             value={playlistName}
             onChange={(e) => setPlaylistName(e.target.value)}
             style={{ ...inputStyle, flex: 1, fontSize: "1rem", padding: "0.75rem" }}
@@ -216,6 +223,7 @@ export default function BuilderPage() {
                   <th style={{ padding: "0.75rem 1rem", color: "var(--text-secondary)", fontWeight: 600, fontSize: "0.75rem", width: "40px" }}>#</th>
                   <th style={{ padding: "0.75rem 1rem", color: "var(--text-secondary)", fontWeight: 600, fontSize: "0.75rem" }}>Track</th>
                   <th style={{ padding: "0.75rem 1rem", color: "var(--text-secondary)", fontWeight: 600, fontSize: "0.75rem" }}>Artist</th>
+                  <th style={{ padding: "0.75rem 1rem", color: "var(--text-secondary)", fontWeight: 600, fontSize: "0.75rem", width: "60px" }}>BPM</th>
                   <th style={{ padding: "0.75rem 1rem", color: "var(--text-secondary)", fontWeight: 600, fontSize: "0.75rem", width: "60px" }}>Pop</th>
                 </tr>
               </thead>
@@ -225,6 +233,7 @@ export default function BuilderPage() {
                     <td style={{ padding: "0.75rem 1rem", color: "var(--text-muted)", fontSize: "0.875rem" }}>{idx + 1}</td>
                     <td style={{ padding: "0.75rem 1rem", fontWeight: 500, fontSize: "0.875rem" }}>{track.title}</td>
                     <td style={{ padding: "0.75rem 1rem", color: "var(--text-secondary)", fontSize: "0.875rem" }}>{track.artist?.title}</td>
+                    <td style={{ padding: "0.75rem 1rem", color: "var(--accent-primary)", fontSize: "0.875rem", fontWeight: 600 }}>{track.audioFeature?.tempo?.toFixed(0) || "-"}</td>
                     <td style={{ padding: "0.75rem 1rem", color: "var(--accent-yellow)", fontSize: "0.875rem", fontWeight: 600 }}>{track.popularity?.score?.toFixed(0) || "-"}</td>
                   </tr>
                 ))}

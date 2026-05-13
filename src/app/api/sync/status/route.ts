@@ -8,6 +8,7 @@ export async function GET() {
     const totalTracks = await prisma.track.count();
     const processedTracks = await prisma.popularity.count();
     const processedAudioFeatures = await prisma.audioFeature.count();
+    const processedBpm = await prisma.audioFeature.count({ where: { tempo: { not: null } } });
     const processedTags = await prisma.track.count({ where: { tagsSyncedAt: { not: null } } });
     
     // Check if there are any active library syncs
@@ -27,6 +28,12 @@ export async function GET() {
         processed: processedAudioFeatures,
         percentage: totalTracks > 0 ? Math.round((processedAudioFeatures / totalTracks) * 100) : 0,
         isComplete: totalTracks > 0 && processedAudioFeatures >= totalTracks,
+      },
+      bpm: {
+        total: totalTracks,
+        processed: processedBpm,
+        percentage: totalTracks > 0 ? Math.round((processedBpm / totalTracks) * 100) : 0,
+        isComplete: totalTracks > 0 && processedBpm >= totalTracks,
       },
       tags: {
         total: totalTracks,

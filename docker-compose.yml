@@ -16,11 +16,11 @@ services:
       retries: 5
 
   app:
-    build: .
+    image: test:test
     container_name: mixarr_app
     restart: always
     ports:
-      - "3000:3000"
+      - "3030:3000"
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://${POSTGRES_USER:-mixarr}:${POSTGRES_PASSWORD:-mixarrpass}@db:5432/${POSTGRES_DB:-mixarrdb}?schema=public

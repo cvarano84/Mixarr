@@ -5,7 +5,7 @@ import { getLibraries } from "@/lib/plex";
 
 export async function POST(req: Request) {
   const cookieStore = cookies();
-  const userId = cookieStore.get("plexmix_session")?.value;
+  const userId = cookieStore.get("mixarr_session")?.value;
 
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

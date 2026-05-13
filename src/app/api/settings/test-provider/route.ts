@@ -19,7 +19,7 @@ export async function POST(req: Request) {
 
     if (provider === "plex") {
       const cookieStore = cookies();
-      const sessionId = cookieStore.get("plexmix_session")?.value;
+      const sessionId = cookieStore.get("mixarr_session")?.value;
       if (!sessionId) {
         return NextResponse.json({ success: false, message: "Not logged in" }, { status: 401 });
       }

@@ -1,6 +1,7 @@
 import prisma from "./prisma";
 import { getSpotifyAudioFeatures } from "./providers/spotify";
 import { getAudioDbFeatures } from "./providers/audiodb";
+import { getDeezerBpm } from "./providers/deezer";
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -20,28 +21,37 @@ export const runAudioFeatureEngine = async () => {
       try {
         // 1. Try AudioDB (Only reliable source left since Spotify killed their Audio Features API)
         let features = await getAudioDbFeatures(track.artist.title, track.title);
+        
+        // 2. Try Deezer specifically for accurate BPM
+        let bpm = await getDeezerBpm(track.artist.title, track.title);
 
-        if (features) {
+        if (features || bpm) {
+          // Merge Deezer BPM into AudioDB features if available
+          const finalEnergy = features ? features.energy : 0.5;
+          const finalValence = features ? features.valence : 0.5;
+          const finalDanceability = features ? features.danceability : 0.5;
+          const finalTempo = bpm ? bpm : (features ? features.tempo : 120);
+
           await prisma.audioFeature.upsert({
             where: { trackId: track.id },
             update: {
-              energy: features.energy,
-              valence: features.valence,
-              danceability: features.danceability,
-              tempo: features.tempo,
+              energy: finalEnergy,
+              valence: finalValence,
+              danceability: finalDanceability,
+              tempo: finalTempo,
               lastUpdated: new Date()
             },
             create: {
               trackId: track.id,
-              energy: features.energy,
-              valence: features.valence,
-              danceability: features.danceability,
-              tempo: features.tempo,
+              energy: finalEnergy,
+              valence: finalValence,
+              danceability: finalDanceability,
+              tempo: finalTempo,
               lastUpdated: new Date()
             }
           });
           
-          console.log(`[AudioFeatureEngine] Track "${track.title}" -> Energy: ${features.energy}, Mood: ${features.valence}`);
+          console.log(`[AudioFeatureEngine] Track "${track.title}" -> Energy: ${finalEnergy}, Mood: ${finalValence}, BPM: ${finalTempo}`);
         } else {
           // Mark as empty to avoid infinite retries
           await prisma.audioFeature.create({

@@ -27,8 +27,8 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const cookieStore = cookies();
-  const sessionId = cookieStore.get("plexmix_session")?.value;
-  
+  const sessionId = cookieStore.get("mixarr_session")?.value;
+
   let user = null;
   if (sessionId) {
     user = await prisma.user.findUnique({
@@ -39,7 +39,7 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.variable} ${outfit.variable}`} style={{ fontFamily: "var(--font-inter), sans-serif" }}>
-        
+
         {/* Animated Mesh Gradient Background */}
         <div className="mesh-bg">
           <div className="mesh-blob-1"></div>

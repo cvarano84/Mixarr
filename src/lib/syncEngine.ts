@@ -18,7 +18,7 @@ const fetchPlexItems = async (serverUri: string, accessToken: string, libraryKey
       headers: {
         "Accept": "application/json",
         "X-Plex-Token": accessToken,
-        "X-Plex-Client-Identifier": (process.env.PLEX_CLIENT_IDENTIFIER || "plexmix-default-client").trim()
+        "X-Plex-Client-Identifier": (process.env.PLEX_CLIENT_IDENTIFIER || "mixarr-default-client").trim()
       }
     });
 

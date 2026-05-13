@@ -91,7 +91,7 @@ export async function POST(req: Request) {
     }
 
     // Set a simple session cookie
-    cookies().set("plexmix_session", user.id, {
+    cookies().set("mixarr_session", user.id, {
       httpOnly: true,
       secure: false, // Must be false for local HTTP access (like 192.168.x.x)
       sameSite: "lax",

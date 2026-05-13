@@ -70,7 +70,7 @@ export default function SettingsPage() {
           </div>
           <div>
             <label style={{ display: "block", fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: "0.25rem" }}>Product Name</label>
-            <input type="text" readOnly value={process.env.PLEX_PRODUCT_NAME || "PlexMix"} style={inputStyle} />
+            <input type="text" readOnly value={process.env.PLEX_PRODUCT_NAME || "Mixarr"} style={inputStyle} />
           </div>
         </div>
       </section>

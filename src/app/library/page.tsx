@@ -9,7 +9,7 @@ export default async function LibraryPage({
   searchParams: { page?: string, query?: string }
 }) {
   const cookieStore = cookies();
-  const sessionId = cookieStore.get("plexmix_session")?.value;
+  const sessionId = cookieStore.get("mixarr_session")?.value;
   
   if (!sessionId) {
     redirect("/");

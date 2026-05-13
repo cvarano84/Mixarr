@@ -4,7 +4,7 @@ import prisma from "@/lib/prisma";
 export async function POST(req: Request) {
   try {
     const { rules, limit = 100 } = await req.json();
-    
+
     let whereClause: any = {
       AND: [],
       NOT: []
@@ -13,10 +13,10 @@ export async function POST(req: Request) {
     if (rules && Array.isArray(rules)) {
       for (const rule of rules) {
         const { field, operator, value } = rule;
-        
+
         const isNumericField = ['popularity', 'energy', 'valence', 'tempo', 'year'].includes(field);
         let prismaCondition: any = {};
-        
+
         if (isNumericField) {
           const numValue = Number(value);
           if (operator === 'eq' || operator === 'contains') prismaCondition = numValue; // Fallback 'contains' to '=' for numbers
@@ -74,7 +74,8 @@ export async function POST(req: Request) {
       include: {
         artist: true,
         album: true,
-        popularity: true
+        popularity: true,
+        audioFeature: true
       },
       take: Number(limit),
       orderBy: { popularity: { score: 'desc' } }

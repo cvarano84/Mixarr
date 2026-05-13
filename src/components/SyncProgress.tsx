@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import axios from "axios";
-import { Loader2, Database, Music, Star, Tag, Play } from "lucide-react";
+import { Loader2, Database, Music, Star, Tag, Play, Activity } from "lucide-react";
 
 export default function SyncProgress() {
   const [status, setStatus] = useState<any>(null);
@@ -102,6 +102,23 @@ export default function SyncProgress() {
           </div>
           {status.tags ? (
              <ProgressBar progress={status.tags} color="linear-gradient(90deg, #10b981, #3b82f6)" />
+          ) : (
+            <div style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>0% (0 / {status.popularity.total})</div>
+          )}
+        </div>
+
+        {/* BPM Sync */}
+        <div style={{ background: "var(--bg-base)", padding: "1rem", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+            <span style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: "0.5rem" }}><Activity size={16} color="#ef4444"/> BPM / Tempo</span>
+            {starting === 'audio' ? <Loader2 size={16} className="animate-spin" /> : (
+              <button onClick={() => startSync('audio')} style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--text-secondary)" }} title="Start Audio Features Sync">
+                <Play size={16} />
+              </button>
+            )}
+          </div>
+          {status.bpm ? (
+             <ProgressBar progress={status.bpm} color="linear-gradient(90deg, #ef4444, var(--accent-yellow))" />
           ) : (
             <div style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>0% (0 / {status.popularity.total})</div>
           )}

@@ -22,3 +22,28 @@ export const getDeezerPopularity = async (artist: string, track: string): Promis
     return null;
   }
 };
+
+export const getDeezerBpm = async (artist: string, track: string): Promise<number | null> => {
+  try {
+    const query = `artist:"${artist}" track:"${track}"`;
+    // Step 1: Search to get the Deezer Track ID
+    const searchRes = await axios.get("https://api.deezer.com/search", {
+      params: { q: query, limit: 1 },
+    });
+
+    if (searchRes.data && searchRes.data.data && searchRes.data.data.length > 0) {
+      const trackId = searchRes.data.data[0].id;
+      
+      // Step 2: Fetch the track details which contains the BPM
+      const trackRes = await axios.get(`https://api.deezer.com/track/${trackId}`);
+      if (trackRes.data && trackRes.data.bpm) {
+        return trackRes.data.bpm;
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error(`Deezer BPM fetch failed for ${artist} - ${track}`);
+    return null;
+  }
+};

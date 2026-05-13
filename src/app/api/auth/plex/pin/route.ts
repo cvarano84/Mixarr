@@ -8,8 +8,8 @@ export async function GET() {
     const pin = await requestPin();
     
     // Construct the Plex Auth URL
-    const clientIdentifier = (process.env.PLEX_CLIENT_IDENTIFIER || "plexmix-default-client").trim();
-    const authAppUrl = `https://app.plex.tv/auth#?clientID=${clientIdentifier}&code=${pin.code}&context[device][product]=${(process.env.PLEX_PRODUCT_NAME || "PlexMix").trim()}`;
+    const clientIdentifier = (process.env.PLEX_CLIENT_IDENTIFIER || "mixarr-default-client").trim();
+    const authAppUrl = `https://app.plex.tv/auth#?clientID=${clientIdentifier}&code=${pin.code}&context[device][product]=${(process.env.PLEX_PRODUCT_NAME || "Mixarr").trim()}`;
 
     return NextResponse.json({
       pinId: pin.id,

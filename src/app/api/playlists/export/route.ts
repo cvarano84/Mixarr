@@ -5,7 +5,7 @@ import axios from "axios";
 
 export async function POST(req: Request) {
   const cookieStore = cookies();
-  const userId = cookieStore.get("plexmix_session")?.value;
+  const userId = cookieStore.get("mixarr_session")?.value;
 
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -52,7 +52,7 @@ export async function POST(req: Request) {
       },
       headers: {
         "X-Plex-Token": targetServer.accessToken,
-        "X-Plex-Client-Identifier": (process.env.PLEX_CLIENT_IDENTIFIER || "plexmix").trim()
+        "X-Plex-Client-Identifier": (process.env.PLEX_CLIENT_IDENTIFIER || "mixarr").trim()
       }
     });
 

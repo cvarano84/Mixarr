@@ -31,8 +31,8 @@ export interface PlexResource {
 
 const getPlexHeaders = () => {
   return {
-    "X-Plex-Client-Identifier": (process.env.PLEX_CLIENT_IDENTIFIER || "plexmix-default-client").trim(),
-    "X-Plex-Product": (process.env.PLEX_PRODUCT_NAME || "PlexMix").trim(),
+    "X-Plex-Client-Identifier": (process.env.PLEX_CLIENT_IDENTIFIER || "mixarr-default-client").trim(),
+    "X-Plex-Product": (process.env.PLEX_PRODUCT_NAME || "Mixarr").trim(),
     "X-Plex-Version": "1.0",
     "X-Plex-Device": "Web",
     "X-Plex-Platform": "Web",
