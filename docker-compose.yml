@@ -16,7 +16,7 @@ services:
       retries: 5
 
   app:
-    image: test:test
+    image: ghcr.io/cvarano84/mixarr:latest
     container_name: mixarr_app
     restart: always
     ports:
