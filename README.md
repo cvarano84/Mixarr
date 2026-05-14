@@ -55,3 +55,9 @@ docker-compose up -d --build
 - **Backend**: Next.js Serverless Routes, Node.js background workers (SyncEngine)
 - **Database**: PostgreSQL mapped with Prisma ORM
 - **Containerization**: Docker & Docker Compose
+
+## Future Features
+
+- **Ideas**: Have and idead for a future fearture 'https://www.reddit.com/r/Softwarr/comments/1tbfb0r/plexmix_smart_playlist_builder_for_plex/' leave a comment with your ideas.
+- **Multiple Tracks**: Will add functionality to allow for albums that have the same song from the same artist to only have one track show up in the playlist. might alsom have a settings toggle.
+- **Discord**: will start a discord server if there is interest. Be a good way to provided feature ideas, get suggestions, and have feedback
