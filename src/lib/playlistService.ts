@@ -484,10 +484,36 @@ export async function exportTracksToPlex({
   }
 }
 
+// Process-local set of PlaylistRule IDs currently being refreshed. Mirrors
+// the manual-drain race guard from src/app/api/sync/start/route.ts: the
+// nightly cron's refreshAutoPlaylists() and the user-facing
+// POST /api/playlists/rules/[id]/refresh can otherwise both invoke this
+// for the same rule, racing on the same Plex playlist mutation (PUT /items,
+// DELETE /items, etc.). The end states usually converge, but the two
+// concurrent runs would double-count in mixarr_playlist_refresh metrics,
+// double-write PlaylistHistory rows, and in worst cases interleave the
+// "delete items" + "add items" calls in a way that leaves the Plex
+// playlist briefly empty or with duplicate entries.
+//
+// In-memory is sufficient because the Next.js server, the cron scheduler
+// and the metrics process all live in the same Node process (the
+// instrumentation hook); we don't have horizontal scale-out.
+const inflightRefreshes = new Set<string>();
+
+export function isRefreshInFlight(ruleId: string): boolean {
+  return inflightRefreshes.has(ruleId);
+}
+
 export async function refreshSavedPlaylist(ruleId: string) {
+  if (inflightRefreshes.has(ruleId)) {
+    console.warn(`[PlaylistRefresh] Skipping ${ruleId}; refresh already in flight.`);
+    return null;
+  }
+
   const rule = await prisma.playlistRule.findUnique({ where: { id: ruleId } });
   if (!rule || !rule.plexPlaylistId || !rule.serverId) return null;
 
+  inflightRefreshes.add(ruleId);
   try {
     const savedRules = JSON.parse(rule.rulesJson);
     const parsed = playlistConfigSchema.parse({
@@ -560,6 +586,8 @@ export async function refreshSavedPlaylist(ruleId: string) {
         lastRefreshError: error.message || "Refresh failed",
       },
     });
+  } finally {
+    inflightRefreshes.delete(ruleId);
   }
 }
 
