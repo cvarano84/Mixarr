@@ -1,5 +1,8 @@
 import axios from "axios";
 
+// See note in audiodb.ts.
+const REQUEST_TIMEOUT_MS = 15_000;
+
 export const getLastFmPopularity = async (artist: string, track: string): Promise<number | null> => {
   const apiKey = process.env.LASTFM_API_KEY;
   if (!apiKey) return null;
@@ -13,6 +16,7 @@ export const getLastFmPopularity = async (artist: string, track: string): Promis
         track: track,
         format: "json",
       },
+      timeout: REQUEST_TIMEOUT_MS,
     });
 
     if (response.data && response.data.track && response.data.track.playcount) {
@@ -27,8 +31,9 @@ export const getLastFmPopularity = async (artist: string, track: string): Promis
     }
 
     return null;
-  } catch (error) {
-    console.error(`Last.fm fetch failed for ${artist} - ${track}`);
+  } catch (error: any) {
+    const reason = error?.code === "ECONNABORTED" ? "timeout" : (error?.code || error?.message || "error");
+    console.error(`[Last.fm] Popularity fetch failed for ${artist} - ${track} (${reason})`);
     return null;
   }
 };
@@ -46,6 +51,7 @@ export const getLastFmTrackTags = async (artist: string, track: string): Promise
         track: track,
         format: "json",
       },
+      timeout: REQUEST_TIMEOUT_MS,
     });
 
     if (response.data?.track?.toptags?.tag) {
@@ -60,8 +66,9 @@ export const getLastFmTrackTags = async (artist: string, track: string): Promise
     }
 
     return [];
-  } catch (error) {
-    console.error(`Last.fm tags fetch failed for ${artist} - ${track}`);
+  } catch (error: any) {
+    const reason = error?.code === "ECONNABORTED" ? "timeout" : (error?.code || error?.message || "error");
+    console.error(`[Last.fm] Tags fetch failed for ${artist} - ${track} (${reason})`);
     return [];
   }
 };

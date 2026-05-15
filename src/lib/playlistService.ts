@@ -344,6 +344,15 @@ function plexHeaders(accessToken: string) {
   };
 }
 
+// Hard cap on the playlist mutation calls below. The same silent-stall rationale
+// from src/lib/providers/* applies here - the Plex server we're calling is on
+// the user's network and frequently goes to sleep / has DNS flakes / restarts
+// mid-call. Without a timeout, Node sits on the socket for ~15 minutes (the
+// default tcp_retries2), which would burn the entire 6h nightly-pipeline
+// budget on a single hung saved-playlist refresh. 30s is a generous cap for
+// mutation requests that have to touch a multi-thousand-track playlist.
+const PLEX_PLAYLIST_TIMEOUT_MS = 30_000;
+
 async function pushTracksToPlex({
   server,
   name,
@@ -362,11 +371,16 @@ async function pushTracksToPlex({
     await axios.put(`${server.uri}/playlists/${playlistId}`, null, {
       params: { title: name },
       headers,
+      timeout: PLEX_PLAYLIST_TIMEOUT_MS,
     }).catch(() => undefined);
-    await axios.delete(`${server.uri}/playlists/${playlistId}/items`, { headers });
+    await axios.delete(`${server.uri}/playlists/${playlistId}/items`, {
+      headers,
+      timeout: PLEX_PLAYLIST_TIMEOUT_MS,
+    });
     await axios.put(`${server.uri}/playlists/${playlistId}/items`, null, {
       params: { uri },
       headers,
+      timeout: PLEX_PLAYLIST_TIMEOUT_MS,
     });
     return playlistId;
   }
@@ -379,6 +393,7 @@ async function pushTracksToPlex({
       uri,
     },
     headers,
+    timeout: PLEX_PLAYLIST_TIMEOUT_MS,
   });
 
   return response.data?.MediaContainer?.Metadata?.[0]?.ratingKey || null;

@@ -1,5 +1,8 @@
 import axios from "axios";
 
+// See note in audiodb.ts.
+const REQUEST_TIMEOUT_MS = 15_000;
+
 let spotifyToken: string | null = null;
 let tokenExpirationTime: number = 0;
 let tokenFailureTime: number = 0;
@@ -29,7 +32,8 @@ const getSpotifyToken = async (): Promise<string | null> => {
         headers: {
           'Authorization': `Basic ${authString}`,
           'Content-Type': 'application/x-www-form-urlencoded'
-        }
+        },
+        timeout: REQUEST_TIMEOUT_MS,
       }
     );
 
@@ -68,7 +72,8 @@ export const getSpotifyPopularity = async (artist: string, track: string): Promi
       },
       headers: {
         'Authorization': `Bearer ${token}`
-      }
+      },
+      timeout: REQUEST_TIMEOUT_MS,
     });
 
     if (response.data && response.data.tracks && response.data.tracks.items.length > 0) {
@@ -84,9 +89,13 @@ export const getSpotifyPopularity = async (artist: string, track: string): Promi
 
     const status = error.response?.status;
     if (status === 429) {
-      const retryAfter = error.response?.headers['retry-after'] || 5;
-      console.warn(`[Spotify] Popularity Rate limited! Requested to wait ${retryAfter}s...`);
-      throw new Error(`RATE_LIMIT:${retryAfter}`); 
+      const retryAfter = Number(error.response?.headers['retry-after']) || 5;
+      // IMPORTANT: also block the cached token so we don't immediately
+      // re-hit Spotify on every subsequent track. Without this, the engine
+      // (especially under loop-to-empty) hammers Spotify forever.
+      tokenFailureTime = Date.now() + (retryAfter * 1000);
+      console.warn(`[Spotify] Popularity Rate limited! Backing off for ${retryAfter}s...`);
+      throw new Error(`RATE_LIMIT:${retryAfter}`);
     }
 
     console.error(`Spotify fetch failed for ${artist} - ${track}:`, error.message, status || '');
@@ -104,7 +113,8 @@ export const getSpotifyAudioFeatures = async (artist: string, track: string): Pr
     
     const searchRes = await axios.get("https://api.spotify.com/v1/search", {
       params: { q: query, type: "track", limit: 1 },
-      headers: { 'Authorization': `Bearer ${token}` }
+      headers: { 'Authorization': `Bearer ${token}` },
+      timeout: REQUEST_TIMEOUT_MS,
     });
 
     if (!searchRes.data?.tracks?.items?.length) {
@@ -114,7 +124,8 @@ export const getSpotifyAudioFeatures = async (artist: string, track: string): Pr
     const spotifyTrackId = searchRes.data.tracks.items[0].id;
 
     const featureRes = await axios.get(`https://api.spotify.com/v1/audio-features/${spotifyTrackId}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
+      headers: { 'Authorization': `Bearer ${token}` },
+      timeout: REQUEST_TIMEOUT_MS,
     });
 
     if (!featureRes.data) return null;
@@ -132,11 +143,13 @@ export const getSpotifyAudioFeatures = async (artist: string, track: string): Pr
 
     const status = error.response?.status;
     if (status === 429) {
-      const retryAfter = error.response?.headers['retry-after'] || 5;
-      console.warn(`[Spotify] Rate limited! Requested to wait ${retryAfter}s...`);
-      throw new Error(`RATE_LIMIT:${retryAfter}`); 
+      const retryAfter = Number(error.response?.headers['retry-after']) || 5;
+      // See comment in getSpotifyPopularity above.
+      tokenFailureTime = Date.now() + (retryAfter * 1000);
+      console.warn(`[Spotify] Audio features rate limited! Backing off for ${retryAfter}s...`);
+      throw new Error(`RATE_LIMIT:${retryAfter}`);
     }
-    
+
     if (status === 403) {
       // Spotify deprecated the Audio Features endpoint on Nov 27, 2024. It returns 403 Forbidden.
       console.warn(`[Spotify] Audio Features API is deprecated and returned 403 Forbidden for ${track}.`);
