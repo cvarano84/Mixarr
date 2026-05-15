@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import axios from "axios";
-import { Loader2, Database, Music, Star, Tag, Play, Activity } from "lucide-react";
+import { Loader2, Database, Music, Star, Tag, Play, Activity, Info } from "lucide-react";
 
 export default function SyncProgress() {
   const [status, setStatus] = useState<any>(null);
@@ -105,6 +105,12 @@ export default function SyncProgress() {
           ) : (
             <div style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>0% (0 / {status.popularity.total})</div>
           )}
+          <div
+            title="Tag enrichment currently only queries Last.fm. If no LASTFM_API_KEY is set in the environment, every track will be marked 'no tags' and this engine will stay at 0%."
+            style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: "0.5rem", display: "flex", alignItems: "center", gap: "0.25rem" }}
+          >
+            <Info size={11} /> Requires <code style={{ background: "rgba(255,255,255,0.05)", padding: "0 0.25rem", borderRadius: "3px" }}>LASTFM_API_KEY</code>
+          </div>
         </div>
 
         {/* BPM Sync */}
