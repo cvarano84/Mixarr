@@ -74,14 +74,24 @@ const getSpotifyToken = async (): Promise<string | null> => {
   // provider in this process.
   await ensureStateLoaded();
 
+  // Enforce the 429 backoff BEFORE handing out any token, cached or fresh.
+  //
+  // The cached token is still technically valid for accounts.spotify.com,
+  // but Spotify's product endpoints (/v1/search, /v1/audio-features, ...)
+  // will keep returning 429 with the same multi-hour Retry-After, and each
+  // 429 in getSpotifyPopularity / getSpotifyAudioFeatures rolls
+  // `tokenFailureTime` forward to "now + Retry-After". When this check
+  // sits *below* the cached-token short-circuit, the drain loop hammers
+  // Spotify every ~250ms, the backoff deadline never stops moving forward,
+  // and we never actually leave the rate-limited state. See README /
+  // metrics dashboard for the symptom.
+  if (Date.now() < tokenFailureTime) {
+    return null;
+  }
+
   // Return cached token if valid
   if (spotifyToken && Date.now() < tokenExpirationTime) {
     return spotifyToken;
-  }
-
-  // Prevent spamming the auth endpoint if it recently failed
-  if (Date.now() < tokenFailureTime) {
-    return null;
   }
 
   try {
