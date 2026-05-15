@@ -4,14 +4,16 @@ import { useRef, useState } from "react";
 import { Pause, Play } from "lucide-react";
 
 let activeAudio: HTMLAudioElement | null = null;
+let activeStop: (() => void) | null = null;
 
 export default function TrackPreviewButton({ trackId }: { trackId: string }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const timerRef = useRef<number | null>(null);
   const [playing, setPlaying] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
 
-  const stop = () => {
+  const stop = (showFailed = false) => {
     if (timerRef.current) {
       window.clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -22,28 +24,28 @@ export default function TrackPreviewButton({ trackId }: { trackId: string }) {
     }
     setPlaying(false);
     setLoading(false);
+    if (showFailed) {
+      setFailed(true);
+      window.setTimeout(() => setFailed(false), 2000);
+    }
   };
 
   const play = async () => {
     if (activeAudio && activeAudio !== audioRef.current) {
-      activeAudio.pause();
+      activeStop?.();
     }
 
     if (!audioRef.current) {
       audioRef.current = new Audio(`/api/tracks/${trackId}/preview`);
       audioRef.current.preload = "none";
-      audioRef.current.addEventListener("ended", stop);
-      audioRef.current.addEventListener("error", stop);
-      audioRef.current.addEventListener("loadedmetadata", () => {
-        const audio = audioRef.current;
-        if (audio && Number.isFinite(audio.duration) && audio.duration > 45) {
-          audio.currentTime = 10;
-        }
-      });
+      audioRef.current.addEventListener("ended", () => stop());
+      audioRef.current.addEventListener("error", () => stop(true));
     }
 
+    setFailed(false);
     setLoading(true);
     activeAudio = audioRef.current;
+    activeStop = stop;
 
     try {
       await audioRef.current.play();
@@ -51,20 +53,20 @@ export default function TrackPreviewButton({ trackId }: { trackId: string }) {
       setLoading(false);
       timerRef.current = window.setTimeout(stop, 30000);
     } catch {
-      stop();
+      stop(true);
     }
   };
 
   return (
     <button
       type="button"
-      title={playing ? "Stop preview" : "Play 30 second preview"}
-      aria-label={playing ? "Stop preview" : "Play 30 second preview"}
-      onClick={playing ? stop : play}
+      title={failed ? "Preview unavailable" : playing ? "Stop preview" : "Play 30 second preview"}
+      aria-label={failed ? "Preview unavailable" : playing ? "Stop preview" : "Play 30 second preview"}
+      onClick={() => playing ? stop() : play()}
       style={previewButtonStyle}
     >
       {playing ? <Pause size={14} /> : <Play size={14} />}
-      <span>{loading ? "Loading" : playing ? "Stop" : "Preview"}</span>
+      <span>{failed ? "Unavailable" : loading ? "Loading" : playing ? "Stop" : "Preview"}</span>
     </button>
   );
 }
