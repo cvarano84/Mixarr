@@ -140,6 +140,15 @@ function ProgressBar({ progress, color }: { progress: any, color: string }) {
     return <div style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>0% (0 / 0)</div>;
   }
 
+  // `attempted` may be undefined when the UI is talking to an older
+  // backend; only show the secondary line when the engine has touched
+  // more rows than it has real data for (i.e. there's actually useful
+  // information beyond what the main bar shows).
+  const attempted: number | undefined =
+    typeof progress.attempted === "number" ? progress.attempted : undefined;
+  const noData = attempted !== undefined ? attempted - progress.processed : 0;
+  const showSecondary = attempted !== undefined && noData > 0;
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.25rem", fontSize: "0.75rem", color: "var(--text-secondary)" }}>
@@ -156,6 +165,14 @@ function ProgressBar({ progress, color }: { progress: any, color: string }) {
           }} 
         />
       </div>
+      {showSecondary && (
+        <div
+          title="'Attempted' includes tracks the engine has touched but where no provider returned data - those get a marker row so we don't retry them for 14 days."
+          style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: "0.35rem" }}
+        >
+          {attempted!.toLocaleString()} attempted ({noData.toLocaleString()} no data)
+        </div>
+      )}
     </div>
   );
 }
