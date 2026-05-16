@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { checkPin, getUser, getServers, getLibraries } from "@/lib/plex";
+import { checkPin, findReachableConnection, getServers, getUser } from "@/lib/plex";
 import prisma from "@/lib/prisma";
 
 export async function POST(req: Request) {
@@ -39,58 +39,10 @@ export async function POST(req: Request) {
       },
     });
 
-    // Fetch user servers
-    const plexServers = await getServers(pin.authToken);
-
-    // Sync Servers to DB
-    for (const server of plexServers) {
-      let workingUri = null;
-
-      // Prioritize local connections, then remote
-      const sortedConnections = [...server.connections].sort((a, b) => (a.local === b.local ? 0 : a.local ? -1 : 1));
-
-      // Test connections to find one that the Docker container can reach
-      for (const conn of sortedConnections) {
-        try {
-          // Add a short timeout so we don't hang forever on bad IPs
-          const res = await fetch(`${conn.uri}/identity`, {
-            headers: { "Accept": "application/json" },
-            signal: AbortSignal.timeout(2000)
-          });
-          if (res.ok) {
-            workingUri = conn.uri;
-            break;
-          }
-        } catch (e) {
-          // Connection failed, try the next one
-          console.log(`Connection to ${conn.uri} failed:`, e);
-        }
-      }
-
-      if (!workingUri) {
-        console.warn(`Could not find a working connection for server ${server.name}`);
-        continue;
-      }
-
-      await prisma.server.upsert({
-        where: { machineIdentifier: server.clientIdentifier },
-        update: {
-          name: server.name,
-          uri: workingUri,
-          accessToken: server.accessToken,
-          userId: user.id,
-        },
-        create: {
-          machineIdentifier: server.clientIdentifier,
-          name: server.name,
-          uri: workingUri,
-          accessToken: server.accessToken,
-          userId: user.id,
-        },
-      });
-    }
-
-    // Set a simple session cookie
+    // Set the session cookie before doing the (still potentially slow)
+    // server discovery. From the user's perspective they're authenticated
+    // at this point; even if discovery fails or the browser disconnects,
+    // they'll be logged in next time they load the dashboard.
     cookies().set("mixarr_session", user.id, {
       httpOnly: true,
       secure: false, // Must be false for local HTTP access (like 192.168.x.x)
@@ -98,6 +50,73 @@ export async function POST(req: Request) {
       maxAge: 60 * 60 * 24 * 30, // 30 days
       path: "/",
     });
+
+    // Discover the user's Plex servers and pick a reachable connection
+    // for each.
+    //
+    // Plex's /resources endpoint returns every server the user has
+    // access to - including friends' servers shared via Plex Home and
+    // remote relays that the Mixarr container can't route to. Previously
+    // we tested each server's connections sequentially with a 2s timeout
+    // per attempt, which meant a user with a handful of shared servers
+    // sat through 20-30 seconds of unexplained "Waiting for Plex..."
+    // while the backend ground through timeouts, and every single failed
+    // connection produced a multi-line DOMException stack trace in the
+    // container logs.
+    //
+    // Now we race all connections for a single server in parallel (first
+    // success wins, the rest are aborted), and process all servers
+    // concurrently, so the whole discovery step is bounded by the
+    // 1500ms per-connection timeout regardless of how many shared servers
+    // the user has.
+    const plexServers = await getServers(pin.authToken);
+
+    const discoveryStart = Date.now();
+    let saved = 0;
+    let skipped = 0;
+
+    await Promise.all(
+      plexServers.map(async (server) => {
+        const result = await findReachableConnection(server.connections);
+
+        if (!result.uri) {
+          // One concise warn per unreachable server instead of the
+          // previous one-stack-trace-per-failed-connection deluge. This
+          // is expected for any server the container's network can't
+          // reach (friends' servers, remote-only servers, etc.).
+          console.warn(
+            `[Plex] Skipping server "${server.name}": no reachable connection ` +
+              `(tried ${result.tried} in ${result.elapsedMs}ms)`,
+          );
+          skipped += 1;
+          return;
+        }
+
+        await prisma.server.upsert({
+          where: { machineIdentifier: server.clientIdentifier },
+          update: {
+            name: server.name,
+            uri: result.uri,
+            accessToken: server.accessToken,
+            userId: user.id,
+          },
+          create: {
+            machineIdentifier: server.clientIdentifier,
+            name: server.name,
+            uri: result.uri,
+            accessToken: server.accessToken,
+            userId: user.id,
+          },
+        });
+        saved += 1;
+      }),
+    );
+
+    console.log(
+      `[Plex] Login complete for ${plexUser.username}: ` +
+        `${saved} reachable / ${skipped} skipped ` +
+        `(${plexServers.length} total in ${Date.now() - discoveryStart}ms)`,
+    );
 
     return NextResponse.json({ status: "success", user });
   } catch (error) {

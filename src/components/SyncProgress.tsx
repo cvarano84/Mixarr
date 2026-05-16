@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import axios from "axios";
-import { Loader2, Database, Music, Star, Tag, Play, Activity } from "lucide-react";
+import { Loader2, Database, Music, Star, Tag, Play, Activity, Info } from "lucide-react";
 
 export default function SyncProgress() {
   const [status, setStatus] = useState<any>(null);
@@ -105,6 +105,12 @@ export default function SyncProgress() {
           ) : (
             <div style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>0% (0 / {status.popularity.total})</div>
           )}
+          <div
+            title="Tag enrichment currently only queries Last.fm. If no LASTFM_API_KEY is set in the environment, every track will be marked 'no tags' and this engine will stay at 0%."
+            style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: "0.5rem", display: "flex", alignItems: "center", gap: "0.25rem" }}
+          >
+            <Info size={11} /> Requires <code style={{ background: "rgba(255,255,255,0.05)", padding: "0 0.25rem", borderRadius: "3px" }}>LASTFM_API_KEY</code>
+          </div>
         </div>
 
         {/* BPM Sync */}
@@ -134,6 +140,15 @@ function ProgressBar({ progress, color }: { progress: any, color: string }) {
     return <div style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>0% (0 / 0)</div>;
   }
 
+  // `attempted` may be undefined when the UI is talking to an older
+  // backend; only show the secondary line when the engine has touched
+  // more rows than it has real data for (i.e. there's actually useful
+  // information beyond what the main bar shows).
+  const attempted: number | undefined =
+    typeof progress.attempted === "number" ? progress.attempted : undefined;
+  const noData = attempted !== undefined ? attempted - progress.processed : 0;
+  const showSecondary = attempted !== undefined && noData > 0;
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.25rem", fontSize: "0.75rem", color: "var(--text-secondary)" }}>
@@ -150,6 +165,14 @@ function ProgressBar({ progress, color }: { progress: any, color: string }) {
           }} 
         />
       </div>
+      {showSecondary && (
+        <div
+          title="'Attempted' includes tracks the engine has touched but where no provider returned data - those get a marker row so we don't retry them for 14 days."
+          style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: "0.35rem" }}
+        >
+          {attempted!.toLocaleString()} attempted ({noData.toLocaleString()} no data)
+        </div>
+      )}
     </div>
   );
 }

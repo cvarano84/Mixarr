@@ -36,8 +36,8 @@ export default function SettingsPage() {
 
           <ProviderTestButton 
             provider="lastfm"
-            title="Last.fm Popularity"
-            description="Used for global trending scores and ranking algorithms."
+            title="Last.fm Popularity & Tags"
+            description="Used for global trending scores AND track genre/tag enrichment. Last.fm is currently the only configured tag source - the Track Genres engine will return 0 results without a LASTFM_API_KEY."
             badgeText="Configured via .env"
             badgeColor="#22c55e"
           />

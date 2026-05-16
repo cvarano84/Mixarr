@@ -8,6 +8,18 @@ import { getLastFmPopularity } from "@/lib/providers/lastfm";
 import { getDeezerPopularity } from "@/lib/providers/deezer";
 
 export async function POST(req: Request) {
+  // Gate every provider branch behind the session cookie. Previously
+  // only the `plex` branch checked; the spotify/lastfm/deezer/audiodb
+  // branches happily made outbound calls using the operator's env
+  // credentials (LASTFM_API_KEY, SPOTIFY_CLIENT_ID/SECRET, ...),
+  // letting any unauthenticated caller burn through the operator's
+  // upstream rate-limit budget and oracle which keys are configured.
+  const cookieStore = cookies();
+  const userId = cookieStore.get("mixarr_session")?.value;
+  if (!userId) {
+    return NextResponse.json({ success: false, message: "Not logged in" }, { status: 401 });
+  }
+
   try {
     const { provider } = await req.json();
 
@@ -18,13 +30,7 @@ export async function POST(req: Request) {
     let message = "";
 
     if (provider === "plex") {
-      const cookieStore = cookies();
-      const sessionId = cookieStore.get("mixarr_session")?.value;
-      if (!sessionId) {
-        return NextResponse.json({ success: false, message: "Not logged in" }, { status: 401 });
-      }
-
-      const server = await prisma.server.findFirst({ where: { userId: sessionId } });
+      const server = await prisma.server.findFirst({ where: { userId } });
       if (!server) {
         return NextResponse.json({ success: false, message: "No Plex server connected" });
       }
