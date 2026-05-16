@@ -2,56 +2,27 @@ import prisma from "./prisma";
 import { getDeezerPopularity } from "./providers/deezer";
 import { getLastFmPopularity } from "./providers/lastfm";
 import { getSpotifyPopularity } from "./providers/spotify";
+import { resolveDelayMs, resolveLimit, type SyncEngineOptions } from "./syncSettings";
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Batch size per invocation. The scheduler calls this engine in a loop until
-// it returns 0, so this is now just a memory/checkpoint knob, not a cap on
-// total throughput.
-const BATCH_SIZE = 5000;
-
-// How long to wait before retrying a track that previously failed to enrich.
-// Stored as a "not_found" marker row in the Popularity table; rows older than
-// this become eligible again so transient provider/network failures don't
-// burn the track in permanently.
-const RETRY_AFTER_DAYS = 14;
-const RETRY_MS = RETRY_AFTER_DAYS * 24 * 60 * 60 * 1000;
-
-/**
- * Process one batch of tracks needing popularity scores.
- * Returns the number of tracks the batch actually attempted (which may be 0
- * if there's no more work). The scheduler uses this to loop until drained.
- */
-export const runPopularityEngine = async (): Promise<number> => {
-  console.log("[PopularityEngine] Starting background popularity sync batch...");
-
-  let attempted = 0;
+export const runPopularityEngine = async (options: SyncEngineOptions = {}) => {
+  console.log("[PopularityEngine] Starting background popularity sync...");
 
   try {
-    const retryThreshold = new Date(Date.now() - RETRY_MS);
+    const batchSize = resolveLimit(options.popularityBatchSize, "POPULARITY_BATCH_SIZE");
+    const providerDelayMs = resolveDelayMs(options.providerDelayMs, 250);
 
+    // Find tracks that have NO popularity record
     const tracksToProcess = await prisma.track.findMany({
-      where: {
-        OR: [
-          // Never attempted
-          { popularity: null },
-          // Previously marked as "not_found" and the retry window has elapsed
-          {
-            popularity: {
-              provider: "not_found",
-              lastUpdated: { lt: retryThreshold },
-            },
-          },
-        ],
-      },
+      where: { popularity: null },
       include: { artist: true },
-      take: BATCH_SIZE,
+      ...(batchSize ? { take: batchSize } : {}),
     });
 
     console.log(`[PopularityEngine] Found ${tracksToProcess.length} tracks needing popularity data.`);
 
     for (const track of tracksToProcess) {
-      attempted += 1;
       let score: number | null = null;
       let provider = "none";
       let confidence = 0;
@@ -81,8 +52,8 @@ export const runPopularityEngine = async (): Promise<number> => {
           }
         }
 
+        // If we found a score, save it
         if (score != null && !isNaN(score)) {
-          // Found a score: upsert with the real value
           await prisma.popularity.upsert({
             where: { trackId: track.id },
             update: {
@@ -91,7 +62,7 @@ export const runPopularityEngine = async (): Promise<number> => {
               confidence,
               matchedArtist: track.artist.title,
               matchedTitle: track.title,
-              lastUpdated: new Date(),
+              lastUpdated: new Date()
             },
             create: {
               trackId: track.id,
@@ -100,56 +71,41 @@ export const runPopularityEngine = async (): Promise<number> => {
               confidence,
               matchedArtist: track.artist.title,
               matchedTitle: track.title,
-              lastUpdated: new Date(),
-            },
+              lastUpdated: new Date()
+            }
           });
+          
           console.log(`[PopularityEngine] Track "${track.title}" -> ${score} (${provider})`);
         } else {
-          // No provider returned anything. Upsert a "not_found" marker so
-          // we skip this track until the retry window elapses, but do NOT
-          // burn it in permanently the way the old code did. We still
-          // clear the confidence/matched-* fields so a previously-real
-          // row that's been re-evaluated and lost its match is described
-          // honestly.
-          await prisma.popularity.upsert({
-            where: { trackId: track.id },
-            update: {
-              score: 0,
-              provider: "not_found",
-              confidence: 0,
-              matchedArtist: null,
-              matchedTitle: null,
-              lastUpdated: new Date(),
-            },
-            create: {
+          // Even if we didn't find one, we should probably mark it so we don't try forever.
+          // For now, we'll store a 0 score with provider 'not_found'
+          await prisma.popularity.create({
+            data: {
               trackId: track.id,
               score: 0,
               provider: "not_found",
               confidence: 0,
-              lastUpdated: new Date(),
-            },
+              lastUpdated: new Date()
+            }
           });
-          console.log(`[PopularityEngine] Track "${track.title}" -> no data (retry in ${RETRY_AFTER_DAYS}d)`);
         }
       } catch (e: any) {
         if (e.message === "NO_TOKEN" || e.message?.startsWith("RATE_LIMIT")) {
-          // Rate limited / auth blocked. Do NOT save a marker row so this
-          // track is retried on the next batch.
-          console.log(`[PopularityEngine] Track "${track.title}" -> skipped (${e.message})`);
+          // We got rate limited by Spotify (or token failed). Do NOT save an empty row. 
+          // Just skip to the next track so this one can be retried on the next run.
         } else {
           console.error(`[PopularityEngine] Unexpected error on track ${track.title}:`, e.message);
         }
       }
 
-      // Respect API rate limits (Especially Last.fm's 5 req/sec).
-      // 250ms = 4 requests per second.
-      await sleep(250);
+      if (providerDelayMs > 0) {
+        await sleep(providerDelayMs);
+      }
     }
 
-    console.log(`[PopularityEngine] Popularity sync batch completed! (${attempted} attempted)`);
+    console.log("[PopularityEngine] Popularity sync batch completed!");
+
   } catch (error) {
     console.error("[PopularityEngine] Sync failed", error);
   }
-
-  return attempted;
 };

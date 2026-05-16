@@ -1,15 +1,10 @@
 import axios from "axios";
 
-// See note in audiodb.ts. Without an explicit timeout, a single dropped TCP
-// connection can stall a worker for ~15 minutes (kernel tcp_retries2 default).
-const REQUEST_TIMEOUT_MS = 15_000;
-
 export const getDeezerPopularity = async (artist: string, track: string): Promise<number | null> => {
   try {
     const query = `artist:"${artist}" track:"${track}"`;
     const response = await axios.get("https://api.deezer.com/search", {
       params: { q: query, limit: 1 },
-      timeout: REQUEST_TIMEOUT_MS,
     });
 
     if (response.data && response.data.data && response.data.data.length > 0) {
@@ -22,9 +17,8 @@ export const getDeezerPopularity = async (artist: string, track: string): Promis
     }
 
     return null;
-  } catch (error: any) {
-    const reason = error?.code === "ECONNABORTED" ? "timeout" : (error?.code || error?.message || "error");
-    console.error(`[Deezer] Popularity fetch failed for ${artist} - ${track} (${reason})`);
+  } catch (error) {
+    console.error(`Deezer fetch failed for ${artist} - ${track}`);
     return null;
   }
 };
@@ -35,25 +29,21 @@ export const getDeezerBpm = async (artist: string, track: string): Promise<numbe
     // Step 1: Search to get the Deezer Track ID
     const searchRes = await axios.get("https://api.deezer.com/search", {
       params: { q: query, limit: 1 },
-      timeout: REQUEST_TIMEOUT_MS,
     });
 
     if (searchRes.data && searchRes.data.data && searchRes.data.data.length > 0) {
       const trackId = searchRes.data.data[0].id;
-
+      
       // Step 2: Fetch the track details which contains the BPM
-      const trackRes = await axios.get(`https://api.deezer.com/track/${trackId}`, {
-        timeout: REQUEST_TIMEOUT_MS,
-      });
+      const trackRes = await axios.get(`https://api.deezer.com/track/${trackId}`);
       if (trackRes.data && trackRes.data.bpm) {
         return trackRes.data.bpm;
       }
     }
 
     return null;
-  } catch (error: any) {
-    const reason = error?.code === "ECONNABORTED" ? "timeout" : (error?.code || error?.message || "error");
-    console.error(`[Deezer] BPM fetch failed for ${artist} - ${track} (${reason})`);
+  } catch (error) {
+    console.error(`Deezer BPM fetch failed for ${artist} - ${track}`);
     return null;
   }
 };

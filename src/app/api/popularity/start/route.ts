@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { runPopularityEngine } from "@/lib/popularityEngine";
+import { getUserSyncSettings } from "@/lib/syncSettings";
 
 export async function POST() {
   const cookieStore = cookies();
@@ -11,8 +12,9 @@ export async function POST() {
   }
 
   try {
+    const syncSettings = await getUserSyncSettings(userId);
     // Fire and forget the background job
-    runPopularityEngine().catch(console.error);
+    runPopularityEngine(syncSettings).catch(console.error);
 
     return NextResponse.json({ status: "started", message: "Popularity sync job initiated" });
   } catch (error) {

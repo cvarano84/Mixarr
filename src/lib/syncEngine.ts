@@ -1,12 +1,31 @@
 import prisma from "./prisma";
 import axios from "axios";
+import { resolveLimit, type SyncEngineOptions } from "./syncSettings";
+
+type PlexItem = Record<string, any> & {
+  Genre?: Array<{ tag: string }>;
+  ratingKey: string | number;
+};
 
 // Helper to fetch paginated items from Plex
-const fetchPlexItems = async (serverUri: string, accessToken: string, libraryKey: string, typeId: number) => {
-  let allItems: any[] = [];
+const fetchPlexItems = async (serverUri: string, accessToken: string, libraryKey: string, typeId: number, pageSize?: number): Promise<PlexItem[]> => {
+  let allItems: PlexItem[] = [];
   let start = 0;
-  const size = 1000;
+  const size = pageSize;
   let totalSize = Infinity;
+
+  if (!size) {
+    const response = await axios.get(`${serverUri}/library/sections/${libraryKey}/all`, {
+      params: { type: typeId },
+      headers: {
+        "Accept": "application/json",
+        "X-Plex-Token": accessToken,
+        "X-Plex-Client-Identifier": (process.env.PLEX_CLIENT_IDENTIFIER || "mixarr-default-client").trim()
+      }
+    });
+
+    return (response.data.MediaContainer.Metadata || []) as PlexItem[];
+  }
 
   while (start < totalSize) {
     const response = await axios.get(`${serverUri}/library/sections/${libraryKey}/all`, {
@@ -26,7 +45,7 @@ const fetchPlexItems = async (serverUri: string, accessToken: string, libraryKey
     totalSize = container.totalSize !== undefined ? container.totalSize : container.size; 
     
     if (container.Metadata) {
-      allItems = allItems.concat(container.Metadata);
+      allItems = allItems.concat(container.Metadata as PlexItem[]);
     }
     
     start += size;
@@ -38,7 +57,7 @@ const fetchPlexItems = async (serverUri: string, accessToken: string, libraryKey
 };
 
 // Helper to process items sequentially to avoid database race conditions (e.g., connectOrCreate constraints)
-async function processInChunks<T>(items: T[], chunkSize: number, processFn: (item: T) => Promise<void>) {
+async function processSequentially<T>(items: T[], processFn: (item: T) => Promise<void>) {
   for (const item of items) {
     await processFn(item);
   }
@@ -71,7 +90,7 @@ function deriveTrackFlags(track: any) {
   };
 }
 
-export const runSyncEngine = async (libraryId: string) => {
+export const runSyncEngine = async (libraryId: string, options: SyncEngineOptions = {}) => {
   const syncLog = await prisma.syncLog.create({
     data: {
       libraryId,
@@ -88,14 +107,15 @@ export const runSyncEngine = async (libraryId: string) => {
     if (!library) throw new Error("Library not found");
 
     const { server } = library;
+    const plexPageSize = resolveLimit(options.plexPageSize, "PLEX_METADATA_PAGE_SIZE");
 
     console.log(`[SyncEngine] Starting sync for library: ${library.name}`);
 
     // 1. Fetch & Upsert Artists (type 8)
-    const plexArtists = await fetchPlexItems(server.uri, server.accessToken, library.plexId, 8);
+    const plexArtists = await fetchPlexItems(server.uri, server.accessToken, library.plexId, 8, plexPageSize);
     console.log(`[SyncEngine] Found ${plexArtists.length} artists`);
 
-    await processInChunks(plexArtists, 50, async (artist) => {
+    await processSequentially(plexArtists, async (artist) => {
       // Handle tags
       const tagsToConnect = [];
       if (artist.Genre) {
@@ -134,14 +154,14 @@ export const runSyncEngine = async (libraryId: string) => {
     });
 
     // 2. Fetch & Upsert Albums (type 9)
-    const plexAlbums = await fetchPlexItems(server.uri, server.accessToken, library.plexId, 9);
+    const plexAlbums = await fetchPlexItems(server.uri, server.accessToken, library.plexId, 9, plexPageSize);
     console.log(`[SyncEngine] Found ${plexAlbums.length} albums`);
 
     // We need artist internal IDs mapping
     const dbArtists = await prisma.artist.findMany({ where: { libraryId }, select: { id: true, plexId: true } });
     const artistMap = new Map(dbArtists.map(a => [a.plexId, a.id]));
 
-    await processInChunks(plexAlbums, 50, async (album) => {
+    await processSequentially(plexAlbums, async (album) => {
       const artistId = artistMap.get(album.parentRatingKey?.toString());
       if (!artistId) return; // Skip if artist missing
 
@@ -169,13 +189,13 @@ export const runSyncEngine = async (libraryId: string) => {
     });
 
     // 3. Fetch & Upsert Tracks (type 10)
-    const plexTracks = await fetchPlexItems(server.uri, server.accessToken, library.plexId, 10);
+    const plexTracks = await fetchPlexItems(server.uri, server.accessToken, library.plexId, 10, plexPageSize);
     console.log(`[SyncEngine] Found ${plexTracks.length} tracks`);
 
     const dbAlbums = await prisma.album.findMany({ where: { libraryId }, select: { id: true, plexId: true } });
     const albumMap = new Map(dbAlbums.map(a => [a.plexId, a.id]));
 
-    await processInChunks(plexTracks, 50, async (track) => {
+    await processSequentially(plexTracks, async (track) => {
       const artistId = artistMap.get(track.grandparentRatingKey?.toString());
       const albumId = albumMap.get(track.parentRatingKey?.toString());
       

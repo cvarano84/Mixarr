@@ -8,14 +8,9 @@ import { getLastFmPopularity } from "@/lib/providers/lastfm";
 import { getDeezerPopularity } from "@/lib/providers/deezer";
 
 export async function POST(req: Request) {
-  // Gate every provider branch behind the session cookie. Previously
-  // only the `plex` branch checked; the spotify/lastfm/deezer/audiodb
-  // branches happily made outbound calls using the operator's env
-  // credentials (LASTFM_API_KEY, SPOTIFY_CLIENT_ID/SECRET, ...),
-  // letting any unauthenticated caller burn through the operator's
-  // upstream rate-limit budget and oracle which keys are configured.
   const cookieStore = cookies();
   const userId = cookieStore.get("mixarr_session")?.value;
+
   if (!userId) {
     return NextResponse.json({ success: false, message: "Not logged in" }, { status: 401 });
   }

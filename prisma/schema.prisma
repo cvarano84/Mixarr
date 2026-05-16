@@ -23,6 +23,21 @@ model User {
   playlistRules PlaylistRule[]
   playlistHistory PlaylistHistory[]
   blockedTracks BlockedTrack[]
+  syncSettings  SyncSettings?
+}
+
+model SyncSettings {
+  id                    String   @id @default(uuid())
+  userId                String   @unique
+  plexPageSize          Int?
+  popularityBatchSize   Int?
+  audioFeatureBatchSize Int?
+  tagBatchSize          Int?
+  bpmBatchSize          Int?
+  providerDelayMs       Int?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Server {
@@ -231,12 +246,6 @@ model SyncLog {
   library   Library  @relation(fields: [libraryId], references: [id], onDelete: Cascade)
 }
 
-// Generic key/value store for state that must survive container restarts.
-// Currently used for Spotify's rate-limit backoff: when the API tells us to
-// wait N hours, we store the absolute expiry timestamp so a container
-// restart can't accidentally "forget" the backoff and immediately hammer
-// Spotify again (which is what caused the 1,698 rate-limit log lines in
-// the original captured trace).
 model SystemState {
   key       String   @id
   value     String

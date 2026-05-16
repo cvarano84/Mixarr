@@ -106,7 +106,7 @@ export default function SyncProgress() {
             <div style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>0% (0 / {status.popularity.total})</div>
           )}
           <div
-            title="Tag enrichment currently only queries Last.fm. If no LASTFM_API_KEY is set in the environment, every track will be marked 'no tags' and this engine will stay at 0%."
+            title="Track genre enrichment currently uses Last.fm. Add LASTFM_API_KEY to enable tag lookups."
             style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: "0.5rem", display: "flex", alignItems: "center", gap: "0.25rem" }}
           >
             <Info size={11} /> Requires <code style={{ background: "rgba(255,255,255,0.05)", padding: "0 0.25rem", borderRadius: "3px" }}>LASTFM_API_KEY</code>
@@ -117,8 +117,8 @@ export default function SyncProgress() {
         <div style={{ background: "var(--bg-base)", padding: "1rem", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
             <span style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: "0.5rem" }}><Activity size={16} color="#ef4444"/> BPM / Tempo</span>
-            {starting === 'audio' ? <Loader2 size={16} className="animate-spin" /> : (
-              <button onClick={() => startSync('audio')} style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--text-secondary)" }} title="Start Audio Features Sync">
+            {starting === 'bpm' ? <Loader2 size={16} className="animate-spin" /> : (
+              <button onClick={() => startSync('bpm')} style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--text-secondary)" }} title="Start Local BPM Backfill">
                 <Play size={16} />
               </button>
             )}
@@ -140,14 +140,9 @@ function ProgressBar({ progress, color }: { progress: any, color: string }) {
     return <div style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>0% (0 / 0)</div>;
   }
 
-  // `attempted` may be undefined when the UI is talking to an older
-  // backend; only show the secondary line when the engine has touched
-  // more rows than it has real data for (i.e. there's actually useful
-  // information beyond what the main bar shows).
-  const attempted: number | undefined =
-    typeof progress.attempted === "number" ? progress.attempted : undefined;
+  const attempted = typeof progress.attempted === "number" ? progress.attempted : undefined;
   const noData = attempted !== undefined ? attempted - progress.processed : 0;
-  const showSecondary = attempted !== undefined && noData > 0;
+  const showAttempted = attempted !== undefined && noData > 0;
 
   return (
     <div>
@@ -165,12 +160,12 @@ function ProgressBar({ progress, color }: { progress: any, color: string }) {
           }} 
         />
       </div>
-      {showSecondary && (
+      {showAttempted && (
         <div
-          title="'Attempted' includes tracks the engine has touched but where no provider returned data - those get a marker row so we don't retry them for 14 days."
+          title="Attempted includes tracks the engine checked but where no provider returned usable data."
           style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: "0.35rem" }}
         >
-          {attempted!.toLocaleString()} attempted ({noData.toLocaleString()} no data)
+          {attempted.toLocaleString()} attempted ({noData.toLocaleString()} no data)
         </div>
       )}
     </div>

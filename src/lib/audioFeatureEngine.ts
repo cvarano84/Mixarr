@@ -1,63 +1,35 @@
 import prisma from "./prisma";
+import { getSpotifyAudioFeatures } from "./providers/spotify";
 import { getAudioDbFeatures } from "./providers/audiodb";
 import { getDeezerBpm } from "./providers/deezer";
+import { resolveDelayMs, resolveLimit, type SyncEngineOptions } from "./syncSettings";
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// See popularityEngine.ts for context on these knobs.
-const BATCH_SIZE = 2000;
-const RETRY_AFTER_DAYS = 14;
-const RETRY_MS = RETRY_AFTER_DAYS * 24 * 60 * 60 * 1000;
-
-/**
- * Process one batch of tracks needing audio features.
- * Returns the number of tracks actually attempted. The scheduler loops this
- * until it returns 0.
- */
-export const runAudioFeatureEngine = async (): Promise<number> => {
-  console.log("[AudioFeatureEngine] Starting background audio features sync batch...");
-
-  let attempted = 0;
+export const runAudioFeatureEngine = async (options: SyncEngineOptions = {}) => {
+  console.log("[AudioFeatureEngine] Starting background audio features sync...");
 
   try {
-    const retryThreshold = new Date(Date.now() - RETRY_MS);
-
+    const batchSize = resolveLimit(options.audioFeatureBatchSize, "AUDIO_FEATURE_BATCH_SIZE");
+    const providerDelayMs = resolveDelayMs(options.providerDelayMs, 250);
     const tracksToProcess = await prisma.track.findMany({
-      where: {
-        OR: [
-          // Never attempted
-          { audioFeature: null },
-          // Previously attempted but all enrichment fields are null
-          // (the "no provider had anything" marker), and the retry window
-          // has elapsed.
-          {
-            audioFeature: {
-              energy: null,
-              valence: null,
-              danceability: null,
-              tempo: null,
-              lastUpdated: { lt: retryThreshold },
-            },
-          },
-        ],
-      },
+      where: { audioFeature: null },
       include: { artist: true },
-      take: BATCH_SIZE,
+      ...(batchSize ? { take: batchSize } : {}),
     });
 
     console.log(`[AudioFeatureEngine] Found ${tracksToProcess.length} tracks needing audio features.`);
 
     for (const track of tracksToProcess) {
-      attempted += 1;
       try {
-        // 1. AudioDB for mood -> energy/valence
+        // 1. Try AudioDB (Only reliable source left since Spotify killed their Audio Features API)
         let features = await getAudioDbFeatures(track.artist.title, track.title);
-
-        // 2. Deezer for accurate BPM
+        
+        // 2. Try Deezer specifically for accurate BPM
         let bpm = await getDeezerBpm(track.artist.title, track.title);
 
         if (features || bpm) {
-          // Got something from at least one provider. Merge what we have.
+          // Merge Deezer BPM into AudioDB features if available
           const finalEnergy = features ? features.energy : 0.5;
           const finalValence = features ? features.valence : 0.5;
           const finalDanceability = features ? features.danceability : 0.5;
@@ -78,7 +50,7 @@ export const runAudioFeatureEngine = async (): Promise<number> => {
               confidence,
               tempoSource,
               tempoConfidence,
-              lastUpdated: new Date(),
+              lastUpdated: new Date()
             },
             create: {
               trackId: track.id,
@@ -90,59 +62,40 @@ export const runAudioFeatureEngine = async (): Promise<number> => {
               confidence,
               tempoSource,
               tempoConfidence,
-              lastUpdated: new Date(),
-            },
+              lastUpdated: new Date()
+            }
           });
-
+          
           console.log(`[AudioFeatureEngine] Track "${track.title}" -> Energy: ${finalEnergy}, Mood: ${finalValence}, BPM: ${finalTempo}`);
         } else {
-          // No provider had anything. Upsert an all-null row so we skip this
-          // track until the retry window elapses, but allow eventual retry
-          // (the old code never retried these). The retry filter above keys
-          // off the four enrichment columns being null, so we leave those
-          // null and use upstream's `source`/`tempoSource = "not_found"`
-          // marker columns to make the no-data state self-describing.
-          await prisma.audioFeature.upsert({
-            where: { trackId: track.id },
-            update: {
-              energy: null,
-              valence: null,
-              danceability: null,
-              tempo: null,
-              source: "not_found",
-              confidence: 0,
-              tempoSource: "not_found",
-              tempoConfidence: 0,
-              lastUpdated: new Date(),
-            },
-            create: {
+          // Mark as empty to avoid infinite retries
+          await prisma.audioFeature.create({
+            data: {
               trackId: track.id,
               source: "not_found",
               confidence: 0,
               tempoSource: "not_found",
               tempoConfidence: 0,
-              lastUpdated: new Date(),
-            },
+              lastUpdated: new Date()
+            }
           });
-          console.log(`[AudioFeatureEngine] Track "${track.title}" -> no data (retry in ${RETRY_AFTER_DAYS}d)`);
         }
       } catch (e: any) {
         if (e.message === "NO_TOKEN" || e.message?.startsWith("RATE_LIMIT")) {
-          // Skip without writing a marker so this track is retried next batch.
-          console.log(`[AudioFeatureEngine] Track "${track.title}" -> skipped (${e.message})`);
+          // Do not log the full stack trace for known auth/rate limits, just skip
         } else {
           console.error(`[AudioFeatureEngine] Unexpected error on track ${track.title}:`, e.message);
         }
       }
 
-      // Respect API rate limits.
-      await sleep(250);
+      if (providerDelayMs > 0) {
+        await sleep(providerDelayMs);
+      }
     }
 
-    console.log(`[AudioFeatureEngine] Audio features sync batch completed! (${attempted} attempted)`);
+    console.log("[AudioFeatureEngine] Audio features sync batch completed!");
+
   } catch (error) {
     console.error("[AudioFeatureEngine] Sync failed", error);
   }
-
-  return attempted;
 };

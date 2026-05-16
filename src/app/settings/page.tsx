@@ -1,6 +1,7 @@
 import { Settings as SettingsIcon, Database, Key, Server, RefreshCw } from "lucide-react";
 import ProviderTestButton from "@/components/ProviderTestButton";
 import LibraryDefaultSelector from "@/components/LibraryDefaultSelector";
+import SyncOptionsForm from "@/components/SyncOptionsForm";
 
 export default function SettingsPage() {
   return (
@@ -36,8 +37,8 @@ export default function SettingsPage() {
 
           <ProviderTestButton 
             provider="lastfm"
-            title="Last.fm Popularity & Tags"
-            description="Used for global trending scores AND track genre/tag enrichment. Last.fm is currently the only configured tag source - the Track Genres engine will return 0 results without a LASTFM_API_KEY."
+            title="Last.fm Popularity"
+            description="Used for global trending scores and ranking algorithms."
             badgeText="Configured via .env"
             badgeColor="#22c55e"
           />
@@ -78,6 +79,17 @@ export default function SettingsPage() {
             <LibraryDefaultSelector />
           </div>
         </div>
+      </section>
+
+      {/* Sync Controls */}
+      <section className="glass-panel" style={{ padding: "1.5rem", borderRadius: "var(--radius-lg)" }}>
+        <h3 style={{ margin: "0 0 0.5rem 0", fontSize: "1.25rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <RefreshCw size={20} color="var(--accent-primary)" /> Sync Controls
+        </h3>
+        <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", margin: "0 0 1.25rem 0" }}>
+          Tune how much metadata each manual sync run processes. Leave a field empty to remove that batch cap.
+        </p>
+        <SyncOptionsForm />
       </section>
 
       {/* Database Management */}

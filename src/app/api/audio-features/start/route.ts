@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { runAudioFeatureEngine } from "@/lib/audioFeatureEngine";
+import { getUserSyncSettings } from "@/lib/syncSettings";
 
 export async function POST() {
   const cookieStore = cookies();
@@ -11,8 +12,9 @@ export async function POST() {
   }
 
   try {
+    const syncSettings = await getUserSyncSettings(userId);
     // Fire and forget the background job
-    runAudioFeatureEngine().catch(console.error);
+    runAudioFeatureEngine(syncSettings).catch(console.error);
 
     return NextResponse.json({ status: "started", message: "Audio Feature sync job initiated" });
   } catch (error) {

@@ -1,44 +1,33 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { runSyncEngine } from "@/lib/syncEngine";
+import { getUserSyncSettings } from "@/lib/syncSettings";
 
-/**
- * Set of engine "slots" that currently have a drain loop in flight in
- * this process. Module-level state is safe because Next.js reuses this
- * route handler module across all requests to /api/sync/start.
- *
- * Without this, repeatedly clicking "Start" in the UI fires off N parallel
- * drain loops, each one independently grabbing the same `take: 2000`
- * window from Prisma. Upserts are idempotent so the DB doesn't corrupt,
- * but every batch doubles (or triples...) the upstream API calls to
- * Deezer / Last.fm / Spotify / AudioDB and burns through whatever
- * rate-limit budget those have.
- *
- * Plex syncs are keyed per-library so two different libraries can still
- * sync in parallel; the enrichment engines (popularity / audio / tags)
- * are global - only one of each can be draining at a time.
- */
 const inflightEngines = new Set<string>();
 
-type DrainSpec = {
-  label: string;
-  load: () => Promise<() => Promise<number>>;
+const engineLabels: Record<string, string> = {
+  plex: "Plex",
+  popularity: "popularity",
+  audio: "audio features",
+  bpm: "BPM",
+  tags: "track genres",
 };
 
-const ENGINE_SPECS: Record<string, DrainSpec> = {
-  popularity: {
-    label: "PopularityEngine",
-    load: () => import("@/lib/popularityEngine").then(m => m.runPopularityEngine),
-  },
-  audio: {
-    label: "AudioFeatureEngine",
-    load: () => import("@/lib/audioFeatureEngine").then(m => m.runAudioFeatureEngine),
-  },
-  tags: {
-    label: "TrackTagEngine",
-    load: () => import("@/lib/trackTagEngine").then(m => m.runTrackTagEngine),
-  },
-};
+function alreadyRunning(key: string, engine: string) {
+  if (!inflightEngines.has(key)) return null;
+
+  return NextResponse.json({
+    status: "already_running",
+    message: `${engineLabels[engine] || engine} sync is already in progress`,
+  });
+}
+
+function runInBackground(key: string, task: () => Promise<unknown>) {
+  inflightEngines.add(key);
+  task()
+    .catch(console.error)
+    .finally(() => inflightEngines.delete(key));
+}
 
 export async function POST(req: Request) {
   const cookieStore = cookies();
@@ -51,71 +40,42 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { libraryId, engine = 'plex' } = body;
+    const syncSettings = await getUserSyncSettings(userId);
 
-    // Plex library sync: keyed per-library so different libraries can
-    // still run in parallel.
     if (engine === 'plex') {
-      if (!libraryId) {
-        return NextResponse.json({ error: "Library ID required" }, { status: 400 });
-      }
+      if (!libraryId) return NextResponse.json({ error: "Library ID required" }, { status: 400 });
       const key = `plex:${libraryId}`;
-      if (inflightEngines.has(key)) {
-        return NextResponse.json({
-          status: "already_running",
-          message: `Plex sync for library ${libraryId} is already in progress; ignoring duplicate request`,
-        });
-      }
-      inflightEngines.add(key);
-      runSyncEngine(libraryId)
-        .catch(console.error)
-        .finally(() => inflightEngines.delete(key));
-      return NextResponse.json({ status: "started", message: "plex sync job initiated" });
-    }
+      const duplicate = alreadyRunning(key, engine);
+      if (duplicate) return duplicate;
 
-    // Enrichment engines: one global slot per engine.
-    const spec = ENGINE_SPECS[engine];
-    if (!spec) {
+      runInBackground(key, () => runSyncEngine(libraryId, syncSettings));
+    } else if (engine === 'popularity') {
+      const duplicate = alreadyRunning(engine, engine);
+      if (duplicate) return duplicate;
+
+      runInBackground(engine, () => import('@/lib/popularityEngine').then(m => m.runPopularityEngine(syncSettings)));
+    } else if (engine === 'audio') {
+      const duplicate = alreadyRunning(engine, engine);
+      if (duplicate) return duplicate;
+
+      runInBackground(engine, () => import('@/lib/audioFeatureEngine').then(m => m.runAudioFeatureEngine(syncSettings)));
+    } else if (engine === 'bpm') {
+      const duplicate = alreadyRunning(engine, engine);
+      if (duplicate) return duplicate;
+
+      runInBackground(engine, () => import('@/lib/localBpmEngine').then(m => m.runLocalBpmEngine(syncSettings)));
+    } else if (engine === 'tags') {
+      const duplicate = alreadyRunning(engine, engine);
+      if (duplicate) return duplicate;
+
+      runInBackground(engine, () => import('@/lib/trackTagEngine').then(m => m.runTrackTagEngine(syncSettings)));
+    } else {
       return NextResponse.json({ error: "Unknown engine" }, { status: 400 });
     }
-
-    if (inflightEngines.has(engine)) {
-      return NextResponse.json({
-        status: "already_running",
-        message: `${engine} sync is already in progress; ignoring duplicate request`,
-      });
-    }
-    inflightEngines.add(engine);
-    spec.load()
-      .then(run => drain(spec.label, run))
-      .catch(console.error)
-      .finally(() => inflightEngines.delete(engine));
 
     return NextResponse.json({ status: "started", message: `${engine} sync job initiated` });
   } catch (error) {
     console.error("Failed to start sync", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
-  }
-}
-
-/**
- * Repeatedly invoke an enrichment engine in the background until it reports
- * the work queue is empty. Returning the empty batch (0 attempts) is the
- * loop's termination signal.
- */
-async function drain(label: string, run: () => Promise<number>): Promise<void> {
-  let totalAttempted = 0;
-  let batchNum = 0;
-  try {
-    while (true) {
-      batchNum += 1;
-      const attempted = await run();
-      totalAttempted += attempted;
-      if (attempted === 0) {
-        console.log(`[ManualSync] ${label} drained after ${batchNum} batch(es); ${totalAttempted} total tracks attempted.`);
-        return;
-      }
-    }
-  } catch (e) {
-    console.error(`[ManualSync] ${label} crashed after ${batchNum} batch(es); ${totalAttempted} attempted:`, e);
   }
 }
