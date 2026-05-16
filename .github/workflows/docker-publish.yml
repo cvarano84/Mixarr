@@ -43,6 +43,17 @@ jobs:
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=short
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+          labels: |
+            org.opencontainers.image.title=Mixarr
+            org.opencontainers.image.description=Smart Playlist Engine for Plex Media Server - Dynamic, vibe-based mixes for your self-hosted music library
+            org.opencontainers.image.vendor=cvarano84
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.documentation=https://github.com/${{ github.repository }}#readme
+            org.opencontainers.image.authors=cvarano84
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
