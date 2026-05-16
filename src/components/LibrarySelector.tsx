@@ -111,7 +111,7 @@ export default function LibrarySelector() {
                 <button
                   onClick={async () => {
                     try {
-                      await axios.post("/api/popularity/start");
+                      await axios.post("/api/sync/start", { engine: "popularity" });
                       alert("Popularity sync started in the background! Check Docker logs.");
                     } catch(e) {
                       alert("Failed to start popularity sync");
@@ -127,7 +127,7 @@ export default function LibrarySelector() {
                 <button
                   onClick={async () => {
                     try {
-                      await axios.post("/api/audio-features/start");
+                      await axios.post("/api/sync/start", { engine: "audio" });
                       alert("Audio Features sync started in the background!");
                     } catch(e) {
                       alert("Failed to start audio feature sync");

@@ -6,6 +6,7 @@ import { getUserSyncSettings } from "@/lib/syncSettings";
 const inflightEngines = new Set<string>();
 
 const engineLabels: Record<string, string> = {
+  initial: "initial enrichment",
   plex: "Plex",
   popularity: "popularity",
   audio: "audio features",
@@ -13,20 +14,26 @@ const engineLabels: Record<string, string> = {
   tags: "track genres",
 };
 
-function alreadyRunning(key: string, engine: string) {
-  if (!inflightEngines.has(key)) return null;
+function toKeys(keys: string | string[]) {
+  return Array.isArray(keys) ? keys : [keys];
+}
+
+function alreadyRunning(keys: string | string[], engine: string) {
+  const runningKey = toKeys(keys).find((key) => inflightEngines.has(key));
+  if (!runningKey) return null;
 
   return NextResponse.json({
     status: "already_running",
-    message: `${engineLabels[engine] || engine} sync is already in progress`,
+    message: `${engineLabels[engine] || engine} sync is already in progress${engine === "initial" && runningKey !== "initial" ? ` (${engineLabels[runningKey] || runningKey} is running)` : ""}`,
   });
 }
 
-function runInBackground(key: string, task: () => Promise<unknown>) {
-  inflightEngines.add(key);
+function runInBackground(keys: string | string[], task: () => Promise<unknown>) {
+  const jobKeys = toKeys(keys);
+  jobKeys.forEach((key) => inflightEngines.add(key));
   task()
     .catch(console.error)
-    .finally(() => inflightEngines.delete(key));
+    .finally(() => jobKeys.forEach((key) => inflightEngines.delete(key)));
 }
 
 export async function POST(req: Request) {
@@ -42,7 +49,13 @@ export async function POST(req: Request) {
     const { libraryId, engine = 'plex' } = body;
     const syncSettings = await getUserSyncSettings(userId);
 
-    if (engine === 'plex') {
+    if (engine === 'initial') {
+      const keys = ["initial", "popularity", "tags", "audio", "bpm"];
+      const duplicate = alreadyRunning(keys, engine);
+      if (duplicate) return duplicate;
+
+      runInBackground(keys, () => runInitialEnrichment(syncSettings));
+    } else if (engine === 'plex') {
       if (!libraryId) return NextResponse.json({ error: "Library ID required" }, { status: 400 });
       const key = `plex:${libraryId}`;
       const duplicate = alreadyRunning(key, engine);
@@ -78,4 +91,27 @@ export async function POST(req: Request) {
     console.error("Failed to start sync", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
+}
+
+async function runInitialEnrichment(syncSettings: Awaited<ReturnType<typeof getUserSyncSettings>>) {
+  console.log("[InitialSync] Starting recommended enrichment sequence...");
+
+  const [
+    popularity,
+    tags,
+    audio,
+    bpm,
+  ] = await Promise.all([
+    import('@/lib/popularityEngine'),
+    import('@/lib/trackTagEngine'),
+    import('@/lib/audioFeatureEngine'),
+    import('@/lib/localBpmEngine'),
+  ]);
+
+  await popularity.runPopularityEngine(syncSettings);
+  await tags.runTrackTagEngine(syncSettings);
+  await audio.runAudioFeatureEngine(syncSettings);
+  await bpm.runLocalBpmEngine(syncSettings);
+
+  console.log("[InitialSync] Recommended enrichment sequence completed.");
 }

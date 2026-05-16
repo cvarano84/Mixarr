@@ -2,11 +2,13 @@
 
 import { useState, useEffect } from "react";
 import axios from "axios";
-import { Loader2, Database, Music, Star, Tag, Play, Activity, Info } from "lucide-react";
+import { Loader2, Database, Music, Star, Tag, Play, Activity, Info, Sparkles } from "lucide-react";
 
 export default function SyncProgress() {
   const [status, setStatus] = useState<any>(null);
   const [starting, setStarting] = useState<string | null>(null);
+  const [showInitialPrompt, setShowInitialPrompt] = useState(false);
+  const [startingInitial, setStartingInitial] = useState(false);
 
   useEffect(() => {
     fetchStatus();
@@ -14,6 +16,31 @@ export default function SyncProgress() {
     const interval = setInterval(fetchStatus, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!status) return;
+
+    const totalTracks = status.popularity?.total || 0;
+    const enrichmentStarted = [
+      status.popularity,
+      status.audioFeatures,
+      status.bpm,
+      status.tags,
+    ].some((progress) => {
+      if (!progress) return false;
+      return (progress.attempted || 0) > 0 || (progress.processed || 0) > 0;
+    });
+
+    const dismissedTrackCount = Number(localStorage.getItem("mixarr_initial_sync_prompt_tracks") || 0);
+    const dismissedForThisLibrary = dismissedTrackCount === totalTracks;
+
+    setShowInitialPrompt(
+      totalTracks > 0 &&
+        !status.metadata?.isSyncing &&
+        !enrichmentStarted &&
+        !dismissedForThisLibrary,
+    );
+  }, [status]);
 
   const fetchStatus = async () => {
     try {
@@ -33,6 +60,31 @@ export default function SyncProgress() {
       alert(`Failed to start ${engine} sync`);
     } finally {
       setTimeout(() => setStarting(null), 1000);
+    }
+  };
+
+  const dismissInitialPrompt = () => {
+    const totalTracks = status?.popularity?.total || 0;
+    if (totalTracks > 0) {
+      localStorage.setItem("mixarr_initial_sync_prompt_tracks", String(totalTracks));
+    }
+    setShowInitialPrompt(false);
+  };
+
+  const startInitialSync = async () => {
+    setStartingInitial(true);
+    try {
+      const res = await axios.post("/api/sync/start", { engine: "initial" });
+      dismissInitialPrompt();
+      alert(res.data?.status === "already_running"
+        ? res.data.message
+        : "Initial data sync started. Large libraries can take a while; you can keep using Mixarr while it runs.");
+      fetchStatus();
+    } catch (e) {
+      console.error("Failed to start initial sync", e);
+      alert("Failed to start initial data sync.");
+    } finally {
+      setStartingInitial(false);
     }
   };
 
@@ -131,6 +183,32 @@ export default function SyncProgress() {
         </div>
 
       </div>
+
+      {showInitialPrompt && (
+        <div style={modalBackdropStyle}>
+          <div style={modalStyle}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.75rem" }}>
+              <Sparkles size={22} color="var(--accent-primary)" />
+              <h4 style={{ margin: 0, fontSize: "1.125rem" }}>Start initial data sync?</h4>
+            </div>
+            <p style={{ color: "var(--text-secondary)", margin: "0 0 1rem 0", lineHeight: 1.5 }}>
+              Your Plex music library is imported. Mixarr can now enrich it with popularity, genres, audio features, and BPM data. This can take a while on large libraries.
+            </p>
+            <p style={{ color: "var(--text-muted)", fontSize: "0.8rem", margin: "0 0 1.25rem 0", lineHeight: 1.5 }}>
+              Recommended order: popularity, track genres, audio features, then BPM. BPM runs last so local tempo analysis can improve or fill gaps after the audio feature pass.
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem", flexWrap: "wrap" }}>
+              <button onClick={dismissInitialPrompt} disabled={startingInitial} style={secondaryButtonStyle}>
+                Maybe later
+              </button>
+              <button onClick={startInitialSync} disabled={startingInitial} style={primaryButtonStyle}>
+                {startingInitial ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                Start recommended sync
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -171,3 +249,49 @@ function ProgressBar({ progress, color }: { progress: any, color: string }) {
     </div>
   );
 }
+
+const modalBackdropStyle = {
+  position: "fixed" as const,
+  inset: 0,
+  background: "rgba(0,0,0,0.62)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "1rem",
+  zIndex: 50,
+};
+
+const modalStyle = {
+  width: "100%",
+  maxWidth: "520px",
+  background: "var(--bg-surface)",
+  border: "1px solid var(--border-subtle)",
+  borderRadius: "var(--radius-lg)",
+  padding: "1.25rem",
+  boxShadow: "0 24px 80px rgba(0,0,0,0.45)",
+};
+
+const primaryButtonStyle = {
+  background: "var(--accent-primary)",
+  color: "white",
+  border: "none",
+  padding: "0.65rem 1rem",
+  borderRadius: "var(--radius-md)",
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  gap: "0.5rem",
+  fontSize: "0.875rem",
+  fontWeight: 700,
+};
+
+const secondaryButtonStyle = {
+  background: "var(--bg-base)",
+  color: "var(--text-secondary)",
+  border: "1px solid var(--border-subtle)",
+  padding: "0.65rem 1rem",
+  borderRadius: "var(--radius-md)",
+  cursor: "pointer",
+  fontSize: "0.875rem",
+  fontWeight: 600,
+};
