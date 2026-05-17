@@ -5,6 +5,9 @@ import {
   providerRequestsTotal,
 } from "../metrics";
 
+// See note in audiodb.ts.
+const REQUEST_TIMEOUT_MS = 15_000;
+
 const PROVIDER = "spotify";
 
 type Outcome = "success" | "not_found" | "timeout" | "rate_limited" | "error";
@@ -92,7 +95,8 @@ const getSpotifyToken = async (): Promise<string | null> => {
         headers: {
           'Authorization': `Basic ${authString}`,
           'Content-Type': 'application/x-www-form-urlencoded'
-        }
+        },
+        timeout: REQUEST_TIMEOUT_MS,
       }
     );
 
@@ -140,7 +144,8 @@ export const getSpotifyPopularity = async (artist: string, track: string): Promi
       },
       headers: {
         'Authorization': `Bearer ${token}`
-      }
+      },
+      timeout: REQUEST_TIMEOUT_MS,
     });
 
     if (response.data && response.data.tracks && response.data.tracks.items.length > 0) {
@@ -189,7 +194,8 @@ export const getSpotifyAudioFeatures = async (artist: string, track: string): Pr
     
     const searchRes = await axios.get("https://api.spotify.com/v1/search", {
       params: { q: query, type: "track", limit: 1 },
-      headers: { 'Authorization': `Bearer ${token}` }
+      headers: { 'Authorization': `Bearer ${token}` },
+      timeout: REQUEST_TIMEOUT_MS,
     });
 
     if (!searchRes.data?.tracks?.items?.length) {
@@ -200,7 +206,8 @@ export const getSpotifyAudioFeatures = async (artist: string, track: string): Pr
     const spotifyTrackId = searchRes.data.tracks.items[0].id;
 
     const featureRes = await axios.get(`https://api.spotify.com/v1/audio-features/${spotifyTrackId}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
+      headers: { 'Authorization': `Bearer ${token}` },
+      timeout: REQUEST_TIMEOUT_MS,
     });
 
     if (!featureRes.data) {

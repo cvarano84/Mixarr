@@ -5,6 +5,9 @@ import {
   providerRequestsTotal,
 } from "../metrics";
 
+// See note in audiodb.ts.
+const REQUEST_TIMEOUT_MS = 15_000;
+
 const PROVIDER = "lastfm";
 
 type Outcome = "success" | "not_found" | "timeout" | "rate_limited" | "error";
@@ -71,6 +74,7 @@ export const getLastFmPopularity = async (artist: string, track: string): Promis
   try {
     const response = await axios.get("http://ws.audioscrobbler.com/2.0/", {
       params: buildTrackParams(apiKey, artist, track),
+      timeout: REQUEST_TIMEOUT_MS,
     });
 
     logAutocorrect(artist, track, response.data?.track);
@@ -109,6 +113,7 @@ export const getLastFmTrackTags = async (artist: string, track: string): Promise
   try {
     const response = await axios.get("http://ws.audioscrobbler.com/2.0/", {
       params: buildTrackParams(apiKey, artist, track),
+      timeout: REQUEST_TIMEOUT_MS,
     });
 
     logAutocorrect(artist, track, response.data?.track);

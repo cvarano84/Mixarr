@@ -4,6 +4,11 @@ import {
   providerRequestsTotal,
 } from "../metrics";
 
+// Hard cap on outbound HTTP calls. Without this, Node will sit on a hung TCP
+// connection until the kernel gives up (~15 min on default tcp_retries2),
+// which was the dominant cause of the engine appearing to stall mid-batch.
+const REQUEST_TIMEOUT_MS = 15_000;
+
 const PROVIDER = "audiodb";
 
 
@@ -31,7 +36,7 @@ export const getAudioDbFeatures = async (artist: string, track: string) => {
     const cleanTrack = encodeURIComponent(track.replace(/[^\w\s]/gi, ''));
 
     const url = `https://theaudiodb.com/api/v1/json/2/searchtrack.php?s=${cleanArtist}&t=${cleanTrack}`;
-    const response = await axios.get(url);
+    const response = await axios.get(url, { timeout: REQUEST_TIMEOUT_MS });
 
     if (response.data && response.data.track && response.data.track.length > 0) {
       const trackData = response.data.track[0];
