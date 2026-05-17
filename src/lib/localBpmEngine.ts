@@ -15,7 +15,12 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const ENGINE = "bpm";
 
-const sampleSeconds = Number(process.env.LOCAL_BPM_SAMPLE_SECONDS || 180);
+function positiveNumber(value: unknown, fallback: number) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+const sampleWindowSeconds = positiveNumber(process.env.LOCAL_BPM_SAMPLE_SECONDS, 60);
 const retryDays = Number(process.env.LOCAL_BPM_RETRY_DAYS || 14);
 const confidenceThreshold = Number(process.env.LOCAL_BPM_CONFIDENCE_THRESHOLD || 0.75);
 const ffmpegPath = process.env.LOCAL_BPM_FFMPEG_PATH || "ffmpeg";
@@ -24,6 +29,22 @@ const aubioPath = process.env.LOCAL_BPM_AUBIO_PATH || "aubio";
 type CommandResult = {
   stdout: string;
   stderr: string;
+};
+
+type BpmSampleWindow = {
+  label: string;
+  startSeconds: number;
+  durationSeconds: number;
+};
+
+type LocalBpmResult = {
+  tempo: number;
+  confidence: number;
+  beats: number;
+};
+
+type WindowBpmResult = LocalBpmResult & {
+  windowLabel: string;
 };
 
 function plexClientIdentifier() {
@@ -57,7 +78,7 @@ function standardDeviation(values: number[]) {
   return Math.sqrt(variance);
 }
 
-function buildPlexTranscodeUrl(serverUri: string, ratingKey: string, accessToken: string) {
+function buildPlexTranscodeUrl(serverUri: string, ratingKey: string, accessToken: string, offsetSeconds = 0) {
   const url = new URL("/music/:/transcode/universal/start.mp3", serverUri);
   url.searchParams.set("path", `/library/metadata/${ratingKey}`);
   url.searchParams.set("protocol", "http");
@@ -69,7 +90,7 @@ function buildPlexTranscodeUrl(serverUri: string, ratingKey: string, accessToken
   url.searchParams.set("musicBitrate", "192");
   url.searchParams.set("audioChannelCount", "2");
   url.searchParams.set("location", "lan");
-  url.searchParams.set("offset", "0");
+  url.searchParams.set("offset", String(Math.max(0, Math.floor(offsetSeconds))));
   url.searchParams.set("transcodeSessionId", `mixarr-local-bpm-${crypto.randomUUID()}`);
   url.searchParams.set("X-Plex-Token", accessToken);
   url.searchParams.set("X-Plex-Client-Identifier", plexClientIdentifier());
@@ -109,14 +130,52 @@ function runCommand(command: string, args: string[], timeoutMs: number): Promise
   });
 }
 
-async function extractAudioSample(inputUrl: string, outputPath: string) {
+function clampSampleStart(startSeconds: number, trackDurationSeconds: number | null, durationSeconds: number) {
+  if (!trackDurationSeconds) return Math.max(0, startSeconds);
+  return Math.max(0, Math.min(startSeconds, Math.max(0, trackDurationSeconds - durationSeconds)));
+}
+
+function buildBpmSampleWindows(trackDurationMs?: number | null) {
+  const trackDurationSeconds = trackDurationMs ? trackDurationMs / 1000 : null;
+  const windowDurationSeconds = trackDurationSeconds
+    ? Math.min(sampleWindowSeconds, trackDurationSeconds)
+    : sampleWindowSeconds;
+  const windows: BpmSampleWindow[] = [];
+
+  const addWindow = (label: string, preferredStartSeconds: number) => {
+    const startSeconds = clampSampleStart(preferredStartSeconds, trackDurationSeconds, windowDurationSeconds);
+    const duplicate = windows.some((window) =>
+      Math.abs(window.startSeconds - startSeconds) < 5 &&
+      Math.abs(window.durationSeconds - windowDurationSeconds) < 5,
+    );
+
+    if (!duplicate) {
+      windows.push({
+        label,
+        startSeconds: Number(startSeconds.toFixed(2)),
+        durationSeconds: Number(windowDurationSeconds.toFixed(2)),
+      });
+    }
+  };
+
+  addWindow("30s-90s", 30);
+
+  if (trackDurationSeconds) {
+    addWindow("middle 60s", (trackDurationSeconds / 2) - (windowDurationSeconds / 2));
+    addWindow("last third 60s", trackDurationSeconds * (2 / 3));
+  }
+
+  return windows;
+}
+
+async function extractAudioSample(inputUrl: string, outputPath: string, durationSeconds: number) {
   await runCommand(ffmpegPath, [
     "-y",
     "-hide_banner",
     "-loglevel",
     "error",
     "-t",
-    String(sampleSeconds),
+    String(durationSeconds),
     "-i",
     inputUrl,
     "-vn",
@@ -127,10 +186,10 @@ async function extractAudioSample(inputUrl: string, outputPath: string) {
     "-sample_fmt",
     "s16",
     outputPath,
-  ], Math.max(60000, sampleSeconds * 2000));
+  ], Math.max(60000, durationSeconds * 2000));
 }
 
-async function analyzeBpmWithAubio(wavPath: string) {
+async function analyzeBpmWithAubio(wavPath: string, durationSeconds: number): Promise<LocalBpmResult | null> {
   const result = await runCommand(aubioPath, ["tempo", wavPath], 120000);
   const directBpm = result.stdout.match(/([0-9]+(?:\.[0-9]+)?)\s*bpm/i);
   if (directBpm) {
@@ -141,7 +200,7 @@ async function analyzeBpmWithAubio(wavPath: string) {
   const beatTimes = result.stdout
     .split(/\r?\n/)
     .map((line) => Number(line.match(/-?[0-9]+(?:\.[0-9]+)?/)?.[0]))
-    .filter((value) => Number.isFinite(value) && value > 0 && value <= sampleSeconds);
+    .filter((value) => Number.isFinite(value) && value > 0 && value <= durationSeconds);
 
   if (beatTimes.length < 6) return null;
 
@@ -158,13 +217,58 @@ async function analyzeBpmWithAubio(wavPath: string) {
   const intervalMedian = median(intervals);
   const intervalStdDev = standardDeviation(intervals);
   const stability = intervalMedian > 0 ? Math.max(0, 1 - (intervalStdDev / intervalMedian)) : 0;
-  const beatCoverage = Math.min(1, intervals.length / Math.max(12, sampleSeconds / 4));
+  const beatCoverage = Math.min(1, intervals.length / Math.max(12, durationSeconds / 4));
   const confidence = Math.max(0.5, Math.min(0.9, 0.45 + stability * 0.35 + beatCoverage * 0.15));
 
   return {
     tempo: normalizeBpm(bpm),
     confidence,
     beats: beatTimes.length,
+  };
+}
+
+function combineWindowResults(results: WindowBpmResult[], expectedWindowCount: number) {
+  if (results.length === 0) return null;
+  if (results.length === 1) return results[0];
+
+  const sortedResults = [...results].sort((a, b) => b.confidence - a.confidence);
+  const clusters: WindowBpmResult[][] = [];
+
+  for (const result of sortedResults) {
+    const cluster = clusters.find((candidate) =>
+      Math.abs(median(candidate.map((item) => item.tempo)) - result.tempo) <= 2.5,
+    );
+
+    if (cluster) {
+      cluster.push(result);
+    } else {
+      clusters.push([result]);
+    }
+  }
+
+  const bestCluster = clusters
+    .sort((a, b) => {
+      if (b.length !== a.length) return b.length - a.length;
+      const aConfidence = a.reduce((sum, item) => sum + item.confidence, 0) / a.length;
+      const bConfidence = b.reduce((sum, item) => sum + item.confidence, 0) / b.length;
+      return bConfidence - aConfidence;
+    })[0];
+
+  const tempos = bestCluster.map((result) => result.tempo);
+  const confidenceMean = bestCluster.reduce((sum, result) => sum + result.confidence, 0) / bestCluster.length;
+  const agreementBoost = Math.min(0.16, (bestCluster.length - 1) * 0.08);
+  const coveragePenalty = Math.max(0, expectedWindowCount - results.length) * 0.04;
+  const disagreementPenalty = Math.max(0, results.length - bestCluster.length) * 0.06;
+  const spreadPenalty = Math.min(0.12, standardDeviation(tempos) / 25);
+
+  return {
+    tempo: normalizeBpm(median(tempos)),
+    confidence: Math.max(
+      0.5,
+      Math.min(0.95, confidenceMean + agreementBoost - coveragePenalty - disagreementPenalty - spreadPenalty),
+    ),
+    beats: bestCluster.reduce((sum, result) => sum + result.beats, 0),
+    windowLabel: bestCluster.map((result) => result.windowLabel).join(", "),
   };
 }
 
@@ -175,14 +279,34 @@ async function assertLocalBpmDependencies() {
 
 async function analyzeTrackLocally(track: any) {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "mixarr-bpm-"));
-  const wavPath = path.join(tempDir, "sample.wav");
 
   try {
     const server = track.library.server;
     const ratingKey = track.ratingKey || track.plexId;
-    const audioUrl = buildPlexTranscodeUrl(server.uri, ratingKey, server.accessToken);
-    await extractAudioSample(audioUrl, wavPath);
-    return await analyzeBpmWithAubio(wavPath);
+    const sampleWindows = buildBpmSampleWindows(track.duration);
+    const results: WindowBpmResult[] = [];
+
+    for (let index = 0; index < sampleWindows.length; index++) {
+      const sampleWindow = sampleWindows[index];
+      const wavPath = path.join(tempDir, `sample-${index}.wav`);
+      const audioUrl = buildPlexTranscodeUrl(
+        server.uri,
+        ratingKey,
+        server.accessToken,
+        sampleWindow.startSeconds,
+      );
+
+      await extractAudioSample(audioUrl, wavPath, sampleWindow.durationSeconds);
+      const bpm = await analyzeBpmWithAubio(wavPath, sampleWindow.durationSeconds);
+      if (bpm) {
+        results.push({
+          ...bpm,
+          windowLabel: sampleWindow.label,
+        });
+      }
+    }
+
+    return combineWindowResults(results, sampleWindows.length);
   } finally {
     await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
   }
@@ -286,8 +410,8 @@ export const runLocalBpmEngine = async (options: SyncEngineOptions = {}) => {
 
         const localBpm = await analyzeTrackLocally(track);
         if (localBpm) {
-          await saveTempo(track.id, localBpm.tempo, "Aubio local analysis", localBpm.confidence);
-          console.log(`[LocalBpmEngine] ${track.artist.title} - ${track.title} -> ${localBpm.tempo} BPM (Aubio, confidence ${localBpm.confidence.toFixed(2)})`);
+          await saveTempo(track.id, localBpm.tempo, "Aubio local multi-window analysis", localBpm.confidence);
+          console.log(`[LocalBpmEngine] ${track.artist.title} - ${track.title} -> ${localBpm.tempo} BPM (Aubio ${localBpm.windowLabel}, confidence ${localBpm.confidence.toFixed(2)})`);
         } else {
           await saveTempo(track.id, null, "local_not_found", 0);
           console.log(`[LocalBpmEngine] ${track.artist.title} - ${track.title} -> BPM not found`);
