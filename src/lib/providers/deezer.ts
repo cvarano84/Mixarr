@@ -12,6 +12,8 @@ const PROVIDER = "deezer";
 
 type Outcome = "success" | "not_found" | "timeout" | "rate_limited" | "error";
 
+const genreNameCache = new Map<string, string>();
+
 function classifyError(error: any): "timeout" | "rate_limited" | "error" {
   if (error?.code === "ECONNABORTED") return "timeout";
   if (error?.response?.status === 429) return "rate_limited";
@@ -81,6 +83,79 @@ export const getDeezerBpm = async (artist: string, track: string): Promise<numbe
     const reason = error?.code === "ECONNABORTED" ? "timeout" : (error?.code || error?.message || "error");
     console.error(`[Deezer] BPM fetch failed for ${artist} - ${track} (${reason})`);
     return null;
+  } finally {
+    endTimer();
+    providerRequestsTotal.inc({ provider: PROVIDER, result });
+  }
+};
+
+async function getDeezerGenreName(genreId: string) {
+  if (genreNameCache.has(genreId)) return genreNameCache.get(genreId);
+
+  const response = await axios.get(`https://api.deezer.com/genre/${genreId}`, {
+    timeout: REQUEST_TIMEOUT_MS,
+  });
+  const name = typeof response.data?.name === "string" ? response.data.name : undefined;
+  if (name) genreNameCache.set(genreId, name);
+  return name;
+}
+
+async function collectAlbumGenreNames(album: any) {
+  const names: string[] = [];
+
+  const genreData = album?.genres?.data;
+  if (Array.isArray(genreData)) {
+    for (const genre of genreData) {
+      if (typeof genre?.name === "string") names.push(genre.name);
+    }
+  }
+
+  if (names.length === 0 && (typeof album?.genre_id === "number" || typeof album?.genre_id === "string")) {
+    const genreName = await getDeezerGenreName(String(album.genre_id));
+    if (genreName) names.push(genreName);
+  }
+
+  return names;
+}
+
+export const getDeezerTrackTags = async (artist: string, track: string): Promise<string[]> => {
+  const endTimer = providerRequestDurationSeconds.startTimer({ provider: PROVIDER });
+  let result: Outcome = "success";
+
+  try {
+    const query = `artist:"${artist}" track:"${track}"`;
+    const searchRes = await axios.get("https://api.deezer.com/search", {
+      params: { q: query, limit: 5 },
+      timeout: REQUEST_TIMEOUT_MS,
+    });
+
+    const matches = Array.isArray(searchRes.data?.data) ? searchRes.data.data : [];
+    const albumIds = Array.from(new Set(
+      matches
+        .map((match: any) => match?.album?.id)
+        .filter((id: unknown): id is number | string =>
+          typeof id === "number" || typeof id === "string",
+        ),
+    ));
+
+    const tags: string[] = [];
+    for (const albumId of albumIds.slice(0, 3)) {
+      const albumRes = await axios.get(`https://api.deezer.com/album/${albumId}`, {
+        timeout: REQUEST_TIMEOUT_MS,
+      });
+      tags.push(...await collectAlbumGenreNames(albumRes.data));
+    }
+
+    if (tags.length === 0) result = "not_found";
+    return tags;
+  } catch (error: any) {
+    result = classifyError(error);
+    const reason = error?.code === "ECONNABORTED" ? "timeout" : (error?.code || error?.message || "error");
+    console.error(`[Deezer] Tags fetch failed for ${artist} - ${track} (${reason})`);
+    if (result === "rate_limited") {
+      throw new Error("RATE_LIMIT:deezer");
+    }
+    return [];
   } finally {
     endTimer();
     providerRequestsTotal.inc({ provider: PROVIDER, result });

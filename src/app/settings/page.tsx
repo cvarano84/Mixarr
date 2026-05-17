@@ -29,6 +29,14 @@ export default function SettingsPage() {
           />
 
           <ProviderTestButton
+            provider="deezer-tags"
+            title="Deezer Genre Tags"
+            description="Primary track-tag seed from matched Deezer album genres."
+            badgeText="Active (Free Tier)"
+            badgeColor="#22c55e"
+          />
+
+          <ProviderTestButton
             provider="discogs-tags"
             title="Discogs Genre Tags"
             description="Opt-in source for release genre and style tags using Discogs Consumer Key and Secret."
@@ -71,7 +79,7 @@ export default function SettingsPage() {
           <ProviderTestButton
             provider="lastfm-tags"
             title="Last.fm Tag Fallback"
-            description="Final genre-tag fallback after Discogs, MusicBrainz, and optional Spotify do not return tags."
+            description="Final genre-tag fallback after Deezer, Discogs, MusicBrainz, and optional Spotify do not return tags."
             badgeText="Fallback only"
             badgeColor="#eab308"
           />

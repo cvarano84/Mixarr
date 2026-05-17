@@ -9,7 +9,7 @@ import {
 } from "@/lib/providers/spotify";
 import { getAudioDbFeatures } from "@/lib/providers/audiodb";
 import { getLastFmPopularity, getLastFmTrackTags } from "@/lib/providers/lastfm";
-import { getDeezerPopularity } from "@/lib/providers/deezer";
+import { getDeezerPopularity, getDeezerTrackTags } from "@/lib/providers/deezer";
 import { getDiscogsTrackTags, isDiscogsTagLookupEnabled } from "@/lib/providers/discogs";
 import { getMusicBrainzTrackTags } from "@/lib/providers/musicbrainz";
 
@@ -86,6 +86,10 @@ export async function POST(req: Request) {
       const tags = await getLastFmTrackTags(artist, track);
       success = tags.length > 0;
       message = success ? `Success: Fetched fallback tags ${tags.slice(0, 5).join(", ")}` : "Failed to fetch Last.fm tags.";
+    } else if (provider === "deezer-tags") {
+      const tags = await getDeezerTrackTags(artist, track);
+      success = tags.length > 0;
+      message = success ? `Success: Fetched genre tags ${tags.slice(0, 5).join(", ")}` : "Failed to fetch Deezer genre tags.";
     } else if (provider === "deezer") {
       const score = await getDeezerPopularity(artist, track);
       success = score !== null;

@@ -158,10 +158,10 @@ export default function SyncProgress() {
             <div style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>0% (0 / {status.popularity.total})</div>
           )}
           <div
-            title="Track genre enrichment tries MusicBrainz, opt-in Discogs/Spotify, then Last.fm as the final fallback."
+            title="Track genre enrichment tries Deezer, MusicBrainz, opt-in Discogs/Spotify, then Last.fm as the final fallback."
             style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: "0.5rem", display: "flex", alignItems: "center", gap: "0.25rem" }}
           >
-            <Info size={11} /> Uses <code style={{ background: "rgba(255,255,255,0.05)", padding: "0 0.25rem", borderRadius: "3px" }}>MusicBrainz</code>; optional <code style={{ background: "rgba(255,255,255,0.05)", padding: "0 0.25rem", borderRadius: "3px" }}>Discogs/Spotify</code>; <code style={{ background: "rgba(255,255,255,0.05)", padding: "0 0.25rem", borderRadius: "3px" }}>Last.fm</code> fallback
+            <Info size={11} /> Uses <code style={{ background: "rgba(255,255,255,0.05)", padding: "0 0.25rem", borderRadius: "3px" }}>Deezer</code>, <code style={{ background: "rgba(255,255,255,0.05)", padding: "0 0.25rem", borderRadius: "3px" }}>MusicBrainz</code>; optional <code style={{ background: "rgba(255,255,255,0.05)", padding: "0 0.25rem", borderRadius: "3px" }}>Discogs/Spotify</code>; <code style={{ background: "rgba(255,255,255,0.05)", padding: "0 0.25rem", borderRadius: "3px" }}>Last.fm</code> fallback
           </div>
         </div>
 

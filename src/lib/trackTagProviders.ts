@@ -3,6 +3,7 @@ import {
   getDiscogsTrackTags,
   isDiscogsTagLookupEnabled,
 } from "./providers/discogs";
+import { getDeezerTrackTags } from "./providers/deezer";
 import { getLastFmTrackTags } from "./providers/lastfm";
 import { getMusicBrainzTrackTags } from "./providers/musicbrainz";
 import {
@@ -10,7 +11,7 @@ import {
   isSpotifyTagLookupEnabled,
 } from "./providers/spotify";
 
-export type TrackTagProviderName = "discogs" | "musicbrainz" | "spotify" | "lastfm";
+export type TrackTagProviderName = "deezer" | "discogs" | "musicbrainz" | "spotify" | "lastfm";
 
 export type TrackTagResolution = {
   tags: string[];
@@ -20,6 +21,7 @@ export type TrackTagResolution = {
 };
 
 const DEFAULT_PROVIDER_ORDER: TrackTagProviderName[] = [
+  "deezer",
   "discogs",
   "musicbrainz",
   "spotify",
@@ -42,9 +44,11 @@ const BLOCKED_TAGS = new Set([
   "covers",
   "single",
   "various artists",
+  "0",
 ]);
 
 const providerLookups: Record<TrackTagProviderName, (artist: string, track: string) => Promise<string[]>> = {
+  deezer: getDeezerTrackTags,
   discogs: getDiscogsTrackTags,
   musicbrainz: getMusicBrainzTrackTags,
   spotify: getSpotifyTrackTags,
@@ -62,6 +66,9 @@ function hasLastFmCredentials() {
 }
 
 function providerEnabled(provider: TrackTagProviderName) {
+  if (provider === "deezer") {
+    return envEnabled("DEEZER_TAGS_ENABLED", true);
+  }
   if (provider === "discogs") {
     return isDiscogsTagLookupEnabled();
   }
@@ -78,7 +85,7 @@ function resolveProviderOrder() {
   const configured = process.env.TRACK_TAG_PROVIDER_ORDER?.split(",")
     .map(value => value.trim().toLowerCase())
     .filter((value): value is TrackTagProviderName =>
-      value === "discogs" || value === "musicbrainz" || value === "spotify" || value === "lastfm",
+      value === "deezer" || value === "discogs" || value === "musicbrainz" || value === "spotify" || value === "lastfm",
     );
 
   return configured?.length ? configured : DEFAULT_PROVIDER_ORDER;
