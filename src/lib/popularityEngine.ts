@@ -13,16 +13,36 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const ENGINE = "popularity";
 
+// How long we wait before retrying a track that previously failed to enrich.
+// We store the failure as a "not_found" row, and re-attempt anything older
+// than this so transient outages don't burn a track in permanently.
+const RETRY_AFTER_DAYS = 14;
+const RETRY_MS = RETRY_AFTER_DAYS * 24 * 60 * 60 * 1000;
+
 export const runPopularityEngine = async (options: SyncEngineOptions = {}) => {
   console.log("[PopularityEngine] Starting background popularity sync...");
 
   try {
     const batchSize = resolveLimit(options.popularityBatchSize, "POPULARITY_BATCH_SIZE");
     const providerDelayMs = resolveDelayMs(options.providerDelayMs, 250);
+    const retryThreshold = new Date(Date.now() - RETRY_MS);
 
-    // Find tracks that have NO popularity record
+    // Find tracks that have no popularity record OR were marked as
+    // "not_found" more than RETRY_AFTER_DAYS ago.
     const tracksToProcess = await prisma.track.findMany({
-      where: { popularity: null },
+      where: {
+        OR: [
+          // Never attempted
+          { popularity: null },
+          // Previously marked as "not_found" and the retry window has elapsed
+          {
+            popularity: {
+              provider: "not_found",
+              lastUpdated: { lt: retryThreshold },
+            },
+          },
+        ],
+      },
       include: { artist: true },
       ...(batchSize ? { take: batchSize } : {}),
     });
@@ -87,16 +107,27 @@ export const runPopularityEngine = async (options: SyncEngineOptions = {}) => {
           
           console.log(`[PopularityEngine] Track "${track.title}" -> ${score} (${provider})`);
         } else {
-          // Even if we didn't find one, we should probably mark it so we don't try forever.
-          // For now, we'll store a 0 score with provider 'not_found'
-          await prisma.popularity.create({
-            data: {
+          // No provider returned anything. Upsert a "not_found" marker so
+          // we skip this track until the retry window elapses (instead of
+          // burning it in permanently). Clearing matchedArtist/matchedTitle
+          // on update keeps a previously-real-then-lost-match row honest.
+          await prisma.popularity.upsert({
+            where: { trackId: track.id },
+            update: {
+              score: 0,
+              provider: "not_found",
+              confidence: 0,
+              matchedArtist: null,
+              matchedTitle: null,
+              lastUpdated: new Date(),
+            },
+            create: {
               trackId: track.id,
               score: 0,
               provider: "not_found",
               confidence: 0,
-              lastUpdated: new Date()
-            }
+              lastUpdated: new Date(),
+            },
           });
           outcome = "not_found";
         }

@@ -11,14 +11,33 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const ENGINE = "tags";
 
+// How long we wait before retrying a track that previously failed to enrich.
+// tagsSyncedAt is bumped on every attempt, so we re-pick anything older than
+// this that still has no genre tag attached.
+const RETRY_AFTER_DAYS = 14;
+const RETRY_MS = RETRY_AFTER_DAYS * 24 * 60 * 60 * 1000;
+
 export const runTrackTagEngine = async (options: SyncEngineOptions = {}) => {
   console.log("[TrackTagEngine] Starting background track tag sync...");
 
   try {
     const batchSize = resolveLimit(options.tagBatchSize, "TRACK_TAG_BATCH_SIZE");
     const providerDelayMs = resolveDelayMs(options.providerDelayMs, 250);
+    const retryThreshold = new Date(Date.now() - RETRY_MS);
     const tracksToProcess = await prisma.track.findMany({
-      where: { tagsSyncedAt: null },
+      where: {
+        OR: [
+          // Never attempted
+          { tagsSyncedAt: null },
+          // Previously attempted, still has no genre tags, retry window elapsed
+          {
+            AND: [
+              { tagsSyncedAt: { lt: retryThreshold } },
+              { tags: { none: { type: "genre" } } },
+            ],
+          },
+        ],
+      },
       include: { artist: true },
       ...(batchSize ? { take: batchSize } : {}),
     });
@@ -56,7 +75,9 @@ export const runTrackTagEngine = async (options: SyncEngineOptions = {}) => {
           }
           console.log(`[TrackTagEngine] Track "${track.title}" -> Tags: ${tags.join(", ")}`);
         } else {
-          // No tags found, but we still mark it as synced so we don't retry it constantly
+          // No tags returned. We still bump tagsSyncedAt below, and the
+          // retry filter above will re-pick this up after RETRY_AFTER_DAYS
+          // if it still has no genre tags.
           outcome = "not_found";
         }
 

@@ -13,14 +13,38 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const ENGINE = "audio_feature";
 
+// How long we wait before retrying a track that previously failed to enrich.
+// We store the failure as an all-null marker row, and re-attempt anything
+// older than this so transient outages don't burn a track in permanently.
+const RETRY_AFTER_DAYS = 14;
+const RETRY_MS = RETRY_AFTER_DAYS * 24 * 60 * 60 * 1000;
+
 export const runAudioFeatureEngine = async (options: SyncEngineOptions = {}) => {
   console.log("[AudioFeatureEngine] Starting background audio features sync...");
 
   try {
     const batchSize = resolveLimit(options.audioFeatureBatchSize, "AUDIO_FEATURE_BATCH_SIZE");
     const providerDelayMs = resolveDelayMs(options.providerDelayMs, 250);
+    const retryThreshold = new Date(Date.now() - RETRY_MS);
     const tracksToProcess = await prisma.track.findMany({
-      where: { audioFeature: null },
+      where: {
+        OR: [
+          // Never attempted
+          { audioFeature: null },
+          // Previously marked all-null (the "nobody had anything" shape) and
+          // the retry window has elapsed. Rows where localBpmEngine later set
+          // tempo won't match because their tempo isn't null.
+          {
+            audioFeature: {
+              energy: null,
+              valence: null,
+              danceability: null,
+              tempo: null,
+              lastUpdated: { lt: retryThreshold },
+            },
+          },
+        ],
+      },
       include: { artist: true },
       ...(batchSize ? { take: batchSize } : {}),
     });
@@ -78,16 +102,31 @@ export const runAudioFeatureEngine = async (options: SyncEngineOptions = {}) => 
           
           console.log(`[AudioFeatureEngine] Track "${track.title}" -> Energy: ${finalEnergy}, Mood: ${finalValence}, BPM: ${finalTempo}`);
         } else {
-          // Mark as empty to avoid infinite retries
-          await prisma.audioFeature.create({
-            data: {
+          // No provider had anything. We upsert an all-null marker so the
+          // retry filter above re-picks this up after RETRY_AFTER_DAYS, and
+          // clear the fields on update so a row that lost a previous match
+          // is honestly described.
+          await prisma.audioFeature.upsert({
+            where: { trackId: track.id },
+            update: {
+              energy: null,
+              valence: null,
+              danceability: null,
+              tempo: null,
+              source: "not_found",
+              confidence: 0,
+              tempoSource: "not_found",
+              tempoConfidence: 0,
+              lastUpdated: new Date(),
+            },
+            create: {
               trackId: track.id,
               source: "not_found",
               confidence: 0,
               tempoSource: "not_found",
               tempoConfidence: 0,
-              lastUpdated: new Date()
-            }
+              lastUpdated: new Date(),
+            },
           });
           outcome = "not_found";
         }
