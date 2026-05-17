@@ -5,6 +5,7 @@ import axios from "axios";
 import { Plus, Trash2, Play, Upload, Star, Music, Shuffle, Activity, Save, RefreshCw, Pin, X, GripVertical } from "lucide-react";
 import BlockTrackButton from "@/components/BlockTrackButton";
 import TrackPreviewButton from "@/components/TrackPreviewButton";
+import styles from "./builder.module.css";
 
 type Rule = {
   field: string;
@@ -470,17 +471,17 @@ export default function BuilderPage() {
   return (
     <div className="builder-container">
       {/* LEFT COLUMN: BUILDER */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "2rem" }}>
-        <header>
-          <h2 style={{ fontSize: "2rem", fontWeight: 700, margin: "0 0 0.5rem 0" }}>Playlist Builder</h2>
-          <p style={{ color: "var(--text-secondary)", margin: 0 }}>Create dynamic mixes using cached metadata</p>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+        <header className={styles.header}>
+          <h2>Playlist Builder</h2>
+          <p>Create dynamic mixes using cached metadata</p>
         </header>
 
         {/* Saved Smart Playlists */}
-        <div className="glass-panel" style={{ padding: "1.5rem", borderRadius: "var(--radius-lg)" }}>
-          <h3 style={{ margin: "0 0 1rem 0", fontSize: "1rem" }}>Saved Smart Playlists</h3>
-          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "center" }}>
-            <select value={selectedRuleId} onChange={(e) => loadSavedRule(e.target.value)} style={{ ...inputStyle, minWidth: "220px", flex: 1 }}>
+        <div className={`glass-panel ${styles.panel}`}>
+          <h3>Saved Smart Playlists</h3>
+          <div className={styles.savedBar}>
+            <select value={selectedRuleId} onChange={(e) => loadSavedRule(e.target.value)} className={styles.savedBarSelect}>
               <option value="">New smart playlist</option>
               {savedRules.map(rule => (
                 <option key={rule.id} value={rule.id}>
@@ -488,101 +489,103 @@ export default function BuilderPage() {
                 </option>
               ))}
             </select>
-            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", color: "var(--text-secondary)", fontSize: "0.875rem" }}>
+            <label className={styles.savedCheck}>
               <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
               Auto-refresh after export
             </label>
-            <button onClick={() => saveSmartPlaylist()} disabled={saving} style={{ background: "var(--bg-base)", border: "1px solid var(--accent-blue)", color: "var(--accent-blue)", padding: "0.5rem 1rem", borderRadius: "var(--radius-md)", cursor: saving ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.875rem", fontWeight: 600 }}>
+            <button onClick={() => saveSmartPlaylist()} disabled={saving} className={styles.btnSecondary}>
               {saving ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
               {selectedRuleId ? "Update" : "Save"}
             </button>
             {selectedRuleId && (
-              <button onClick={refreshSelectedPlaylist} disabled={saving} style={{ background: "var(--bg-base)", border: "1px solid var(--accent-primary)", color: "var(--accent-primary)", padding: "0.5rem 1rem", borderRadius: "var(--radius-md)", cursor: saving ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.875rem", fontWeight: 600 }}>
+              <button onClick={refreshSelectedPlaylist} disabled={saving} className={styles.btnSecondary}>
                 <RefreshCw size={16} />
                 Refresh Plex
               </button>
             )}
           </div>
           {selectedRuleId && savedRules.find(rule => rule.id === selectedRuleId)?.lastRefreshedAt && (
-            <p style={{ margin: "0.75rem 0 0 0", color: "var(--text-muted)", fontSize: "0.75rem" }}>
+            <p className={styles.savedTimestamp}>
               Last Plex refresh: {new Date(savedRules.find(rule => rule.id === selectedRuleId)!.lastRefreshedAt!).toLocaleString()}
             </p>
           )}
         </div>
 
         {/* Quick Templates */}
-        <div className="glass-panel" style={{ padding: "1.5rem", borderRadius: "var(--radius-lg)" }}>
-          <h3 style={{ margin: "0 0 1rem 0", fontSize: "1rem" }}>Quick Templates</h3>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
-            <button onClick={() => applyTemplate("deep_cuts")} style={btnStyle("var(--accent-blue)")}><Shuffle size={14} /> Deep Cuts</button>
-            <button onClick={() => applyTemplate("90s")} style={btnStyle("var(--accent-primary)")}><Music size={14} /> 90s Decade</button>
-            <button onClick={() => applyTemplate("workout")} style={btnStyle("var(--accent-primary)")}><Activity size={14} /> Workout (High BPM)</button>
-            <button onClick={() => applyTemplate("christmas")} style={btnStyle("var(--accent-yellow)")}><Star size={14} /> Seasonal</button>
-            <button onClick={() => applyTemplate("anti_christmas")} style={btnStyle("var(--text-muted)")}>Anti-Seasonal</button>
+        <div className={`glass-panel ${styles.panel}`}>
+          <h3>Quick Templates</h3>
+          <div className={styles.templateRow}>
+            <button onClick={() => applyTemplate("deep_cuts")} className={styles.btnTemplate}><Shuffle size={14} /> Deep Cuts</button>
+            <button onClick={() => applyTemplate("90s")} className={styles.btnTemplate}><Music size={14} /> 90s Decade</button>
+            <button onClick={() => applyTemplate("workout")} className={styles.btnTemplate}><Activity size={14} /> Workout (High BPM)</button>
+            <button onClick={() => applyTemplate("christmas")} className={styles.btnTemplate}><Star size={14} /> Seasonal</button>
+            <button onClick={() => applyTemplate("anti_christmas")} className={styles.btnTemplate}>Anti-Seasonal</button>
           </div>
         </div>
 
         {/* Playlist Behavior */}
-        <div className="glass-panel" style={{ padding: "1.5rem", borderRadius: "var(--radius-lg)" }}>
-          <h3 style={{ margin: "0 0 1rem 0", fontSize: "1rem" }}>Playlist Behavior</h3>
-          <div style={{ display: "grid", gap: "1rem" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "0.75rem" }}>
-              <label style={optionLabelStyle}>
+        <div className={`glass-panel ${styles.panel}`}>
+          <h3>Playlist Behavior</h3>
+          <div className={styles.behaviorGrid}>
+            <div className={styles.behaviorRow}>
+              <label className={styles.optionLabel}>
                 Duplicate Control
-                <select value={duplicateStrategy} onChange={(e) => { setDuplicateStrategy(e.target.value as "allow" | "song_artist"); setTracks([]); }} style={inputStyle}>
+                <select value={duplicateStrategy} onChange={(e) => { setDuplicateStrategy(e.target.value as "allow" | "song_artist"); setTracks([]); }} className={styles.select}>
                   <option value="song_artist">One version per song</option>
                   <option value="allow">Allow duplicates</option>
                 </select>
               </label>
-              <label style={optionLabelStyle}>
+              <label className={styles.optionLabel}>
                 Top-Level Groups
-                <select value={rootCombinator} onChange={(e) => { setRootCombinator(e.target.value as "AND" | "OR"); setTracks([]); }} style={inputStyle}>
+                <select value={rootCombinator} onChange={(e) => { setRootCombinator(e.target.value as "AND" | "OR"); setTracks([]); }} className={styles.select}>
                   <option value="AND">Match all groups</option>
                   <option value="OR">Match any group</option>
                 </select>
               </label>
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}>
-              <label style={checkStyle}><input type="checkbox" checked={preferNonLive} onChange={(e) => { setPreferNonLive(e.target.checked); setTracks([]); }} /> Prefer non-live duplicates</label>
-              <label style={checkStyle}><input type="checkbox" checked={excludeRemasters} onChange={(e) => { setExcludeRemasters(e.target.checked); setTracks([]); }} /> Exclude remasters</label>
-              <label style={checkStyle}><input type="checkbox" checked={negativeFilters.excludeHoliday} onChange={(e) => setNegativeFilters({ ...negativeFilters, excludeHoliday: e.target.checked })} /> Exclude holiday tracks</label>
-              <label style={checkStyle}><input type="checkbox" checked={negativeFilters.excludeLive} onChange={(e) => setNegativeFilters({ ...negativeFilters, excludeLive: e.target.checked })} /> Exclude live tracks</label>
-              <label style={checkStyle}><input type="checkbox" checked={negativeFilters.excludeExplicit} onChange={(e) => setNegativeFilters({ ...negativeFilters, excludeExplicit: e.target.checked })} /> Exclude explicit tracks</label>
-              <label style={checkStyle}><input type="checkbox" checked={negativeFilters.excludeIntroOutro} onChange={(e) => setNegativeFilters({ ...negativeFilters, excludeIntroOutro: e.target.checked })} /> Exclude intros/outros</label>
+            <div className={styles.checkGroup}>
+              <label className={styles.checkLabel}><input type="checkbox" checked={preferNonLive} onChange={(e) => { setPreferNonLive(e.target.checked); setTracks([]); }} /> Prefer non-live duplicates</label>
+              <label className={styles.checkLabel}><input type="checkbox" checked={excludeRemasters} onChange={(e) => { setExcludeRemasters(e.target.checked); setTracks([]); }} /> Exclude remasters</label>
+              <label className={styles.checkLabel}><input type="checkbox" checked={negativeFilters.excludeHoliday} onChange={(e) => setNegativeFilters({ ...negativeFilters, excludeHoliday: e.target.checked })} /> Exclude holiday tracks</label>
+              <label className={styles.checkLabel}><input type="checkbox" checked={negativeFilters.excludeLive} onChange={(e) => setNegativeFilters({ ...negativeFilters, excludeLive: e.target.checked })} /> Exclude live tracks</label>
+              <label className={styles.checkLabel}><input type="checkbox" checked={negativeFilters.excludeExplicit} onChange={(e) => setNegativeFilters({ ...negativeFilters, excludeExplicit: e.target.checked })} /> Exclude explicit tracks</label>
+              <label className={styles.checkLabel}><input type="checkbox" checked={negativeFilters.excludeIntroOutro} onChange={(e) => setNegativeFilters({ ...negativeFilters, excludeIntroOutro: e.target.checked })} /> Exclude intros/outros</label>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "0.75rem" }}>
-              <label style={optionLabelStyle}>Min Rating<input value={negativeFilters.minRating} onChange={(e) => setNegativeFilters({ ...negativeFilters, minRating: e.target.value })} placeholder="0-10" style={inputStyle} /></label>
-              <label style={optionLabelStyle}>Not Played Days<input value={negativeFilters.excludePlayedWithinDays} onChange={(e) => setNegativeFilters({ ...negativeFilters, excludePlayedWithinDays: e.target.value })} placeholder="30" style={inputStyle} /></label>
-              <label style={optionLabelStyle}>Min Minutes<input value={negativeFilters.minDurationMinutes} onChange={(e) => setNegativeFilters({ ...negativeFilters, minDurationMinutes: e.target.value })} placeholder="1" style={inputStyle} /></label>
-              <label style={optionLabelStyle}>Max Minutes<input value={negativeFilters.maxDurationMinutes} onChange={(e) => setNegativeFilters({ ...negativeFilters, maxDurationMinutes: e.target.value })} placeholder="8" style={inputStyle} /></label>
+            <div className={styles.behaviorRow}>
+              <label className={styles.optionLabel}>Min Rating<input value={negativeFilters.minRating} onChange={(e) => setNegativeFilters({ ...negativeFilters, minRating: e.target.value })} placeholder="0-10" className={styles.input} /></label>
+              <label className={styles.optionLabel}>Not Played Days<input value={negativeFilters.excludePlayedWithinDays} onChange={(e) => setNegativeFilters({ ...negativeFilters, excludePlayedWithinDays: e.target.value })} placeholder="30" className={styles.input} /></label>
+              <label className={styles.optionLabel}>Min Minutes<input value={negativeFilters.minDurationMinutes} onChange={(e) => setNegativeFilters({ ...negativeFilters, minDurationMinutes: e.target.value })} placeholder="1" className={styles.input} /></label>
+              <label className={styles.optionLabel}>Max Minutes<input value={negativeFilters.maxDurationMinutes} onChange={(e) => setNegativeFilters({ ...negativeFilters, maxDurationMinutes: e.target.value })} placeholder="8" className={styles.input} /></label>
             </div>
           </div>
         </div>
 
         {/* Rule Builder */}
-        <div className="glass-panel" style={{ padding: "1.5rem", borderRadius: "var(--radius-lg)", flex: 1 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "1.5rem" }}>
+        <div className={`glass-panel ${styles.rulePanel}`}>
+          <div className={styles.ruleHeader}>
             <div>
-              <h3 style={{ margin: "0 0 0.5rem 0", fontSize: "1rem" }}>Matching Rules</h3>
-              <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+              <h3>Matching Rules</h3>
+              <p className={styles.panelSubtext}>
                 <strong>Cheat Sheet:</strong> Happy (Energy: 0.7, Mood: 0.9) | Relaxed (E: 0.2, M: 0.6) | Aggressive (E: 0.9, M: 0.3) | Sad (E: 0.3, M: 0.2)
               </p>
             </div>
-            <button onClick={addRule} style={{ background: "none", border: "none", color: "var(--accent-primary)", cursor: "pointer", display: "flex", alignItems: "center", gap: "0.25rem", fontSize: "0.875rem", fontWeight: 500 }}>
-              <Plus size={16} /> Add Rule
-            </button>
-            <button onClick={addGroup} style={{ background: "none", border: "none", color: "var(--accent-blue)", cursor: "pointer", display: "flex", alignItems: "center", gap: "0.25rem", fontSize: "0.875rem", fontWeight: 500 }}>
-              <Plus size={16} /> Add OR Group
-            </button>
+            <div className={styles.ruleHeaderActions}>
+              <button onClick={addRule} className={styles.btnGhost}>
+                <Plus size={16} /> Add Rule
+              </button>
+              <button onClick={addGroup} className={styles.btnGhost}>
+                <Plus size={16} /> Add OR Group
+              </button>
+            </div>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "1rem", marginBottom: "2rem" }}>
+          <div className={styles.ruleList}>
             {rules.map((rule, i) => (
-              <div key={i} className="rule-row">
+              <div key={i} className={styles.ruleRow}>
                 <select
                   value={rule.field}
                   onChange={(e) => updateRule(i, "field", e.target.value)}
-                  style={inputStyle}
+                  className={styles.select}
                 >
                   <option value="popularity">Popularity Score (0-100)</option>
                   <option value="energy">Energy (0.0-1.0)</option>
@@ -605,7 +608,7 @@ export default function BuilderPage() {
                 <select
                   value={rule.operator}
                   onChange={(e) => updateRule(i, "operator", e.target.value)}
-                  style={inputStyle}
+                  className={styles.select}
                 >
                   <option value="eq">Equals (=)</option>
                   <option value="contains">Contains</option>
@@ -621,28 +624,29 @@ export default function BuilderPage() {
                   value={rule.value}
                   onChange={(e) => updateRule(i, "value", e.target.value)}
                   placeholder="Value..."
-                  style={{ ...inputStyle, flex: 1 }}
+                  className={styles.input}
+                  style={{ flex: 1 }}
                 />
 
-                <button onClick={() => removeRule(i)} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "0.5rem" }}>
+                <button onClick={() => removeRule(i)} className={styles.btnGhostDanger}>
                   <Trash2 size={16} />
                 </button>
               </div>
             ))}
             {ruleGroups.map((group) => (
-              <div key={group.id} style={{ border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)", padding: "1rem", display: "grid", gap: "0.75rem" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "center" }}>
-                  <select value={group.combinator} onChange={(e) => updateGroup(group.id, { combinator: e.target.value as "AND" | "OR" })} style={inputStyle}>
+              <div key={group.id} className={styles.ruleGroupBox}>
+                <div className={styles.ruleGroupHeader}>
+                  <select value={group.combinator} onChange={(e) => updateGroup(group.id, { combinator: e.target.value as "AND" | "OR" })} className={styles.select}>
                     <option value="OR">Any rule in this group</option>
                     <option value="AND">All rules in this group</option>
                   </select>
-                  <button onClick={() => setRuleGroups(ruleGroups.filter(item => item.id !== group.id))} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer" }}>
+                  <button onClick={() => setRuleGroups(ruleGroups.filter(item => item.id !== group.id))} className={styles.btnGhostDanger}>
                     <Trash2 size={16} />
                   </button>
                 </div>
                 {group.rules.map((rule, i) => (
-                  <div key={i} className="rule-row">
-                    <select value={rule.field} onChange={(e) => updateGroupRule(group.id, i, "field", e.target.value)} style={inputStyle}>
+                  <div key={i} className={styles.ruleRow}>
+                    <select value={rule.field} onChange={(e) => updateGroupRule(group.id, i, "field", e.target.value)} className={styles.select}>
                       <option value="popularity">Popularity Score (0-100)</option>
                       <option value="energy">Energy (0.0-1.0)</option>
                       <option value="valence">Mood/Valence (0.0-1.0)</option>
@@ -660,7 +664,7 @@ export default function BuilderPage() {
                       <option value="album">Album Title</option>
                       <option value="title">Track Title</option>
                     </select>
-                    <select value={rule.operator} onChange={(e) => updateGroupRule(group.id, i, "operator", e.target.value)} style={inputStyle}>
+                    <select value={rule.operator} onChange={(e) => updateGroupRule(group.id, i, "operator", e.target.value)} className={styles.select}>
                       <option value="eq">Equals (=)</option>
                       <option value="contains">Contains</option>
                       <option value="not_contains">Does Not Contain</option>
@@ -669,25 +673,25 @@ export default function BuilderPage() {
                       <option value="gte">Greater or Equal (&ge;)</option>
                       <option value="lte">Less or Equal (&le;)</option>
                     </select>
-                    <input type="text" value={rule.value} onChange={(e) => updateGroupRule(group.id, i, "value", e.target.value)} placeholder="Value..." style={{ ...inputStyle, flex: 1 }} />
-                    <button onClick={() => removeGroupRule(group.id, i)} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "0.5rem" }}>
+                    <input type="text" value={rule.value} onChange={(e) => updateGroupRule(group.id, i, "value", e.target.value)} placeholder="Value..." className={styles.input} style={{ flex: 1 }} />
+                    <button onClick={() => removeGroupRule(group.id, i)} className={styles.btnGhostDanger}>
                       <Trash2 size={16} />
                     </button>
                   </div>
                 ))}
-                <button onClick={() => addGroupRule(group.id)} style={{ background: "none", border: "none", color: "var(--accent-primary)", cursor: "pointer", justifySelf: "start", display: "flex", alignItems: "center", gap: "0.25rem", fontSize: "0.875rem", fontWeight: 500 }}>
+                <button onClick={() => addGroupRule(group.id)} className={styles.btnGhost}>
                   <Plus size={16} /> Add Group Rule
                 </button>
               </div>
             ))}
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "1rem", borderTop: "1px solid var(--border-subtle)", paddingTop: "1.5rem" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              <label style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>Track Limit:</label>
-              <input type="number" value={limit} onChange={(e) => { setLimit(Number(e.target.value)); setTracks([]); }} style={{ ...inputStyle, width: "80px" }} />
+          <div className={styles.ruleFooter}>
+            <div className={styles.limitLabel}>
+              <label>Track Limit:</label>
+              <input type="number" value={limit} onChange={(e) => { setLimit(Number(e.target.value)); setTracks([]); }} className={styles.limitInput} />
             </div>
-            <button onClick={previewPlaylist} disabled={loading} style={{ background: "var(--accent-primary)", color: "white", border: "none", padding: "0.75rem 1.5rem", borderRadius: "var(--radius-md)", cursor: "pointer", display: "flex", alignItems: "center", gap: "0.5rem", fontWeight: 600, marginLeft: "auto" }}>
+            <button onClick={previewPlaylist} disabled={loading} className={styles.btnPrimary} style={{ marginLeft: "auto" }}>
               <Play size={16} /> {loading ? "Querying..." : "Preview Playlist"}
             </button>
           </div>
@@ -695,43 +699,43 @@ export default function BuilderPage() {
       </div>
 
       {/* RIGHT COLUMN: PREVIEW */}
-      <div className="glass-panel" style={{ flex: 1, display: "flex", flexDirection: "column", gap: "1rem", padding: "1.5rem", borderRadius: "var(--radius-lg)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem" }}>
-          <h3 style={{ margin: "0", fontSize: "1.25rem" }}>Playlist Preview</h3>
-          <button onClick={regenerateUnpinned} disabled={loading || tracks.length === 0} style={{ background: "var(--bg-base)", border: "1px solid var(--accent-primary)", color: "var(--accent-primary)", padding: "0.5rem 0.75rem", borderRadius: "var(--radius-md)", cursor: loading || tracks.length === 0 ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.75rem", fontWeight: 600, opacity: loading || tracks.length === 0 ? 0.5 : 1 }}>
+      <div className={`glass-panel ${styles.previewPanel}`}>
+        <div className={styles.previewHeader}>
+          <h3>Playlist Preview</h3>
+          <button onClick={regenerateUnpinned} disabled={loading || tracks.length === 0} className={styles.btnSecondary}>
             <RefreshCw size={14} /> Regenerate Open Slots
           </button>
         </div>
 
-        <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
+        <div className={styles.previewNameRow}>
           <input
             type="text"
             placeholder="Name your playlist..."
             value={playlistName}
             onChange={(e) => setPlaylistName(e.target.value)}
-            style={{ ...inputStyle, flex: 1, fontSize: "1rem", padding: "0.75rem" }}
+            className={styles.previewNameInput}
           />
-          <button onClick={exportToPlex} disabled={exporting || tracks.length === 0} style={{ background: "var(--accent-blue)", color: "white", border: "none", padding: "0.75rem 1.5rem", borderRadius: "var(--radius-md)", cursor: (exporting || tracks.length === 0) ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "0.5rem", fontWeight: 600, opacity: (exporting || tracks.length === 0) ? 0.5 : 1 }}>
+          <button onClick={exportToPlex} disabled={exporting || tracks.length === 0} className={styles.btnPrimary}>
             <Upload size={16} /> {exporting ? "Pushing..." : "Push to Plex"}
           </button>
         </div>
 
         <div className="table-container">
           {tracks.length === 0 ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text-muted)", fontSize: "0.875rem" }}>
+            <div className={styles.emptyPreview}>
               Click Preview Playlist to see results
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
+            <table className={styles.previewTable}>
               <thead>
-                <tr style={{ borderBottom: "1px solid var(--border-subtle)", backgroundColor: "var(--bg-surface)", position: "sticky", top: 0 }}>
-                  <th style={{ padding: "0.75rem 1rem", color: "var(--text-secondary)", fontWeight: 600, fontSize: "0.75rem", width: "40px" }}>#</th>
-                  <th style={{ padding: "0.75rem 0.25rem", color: "var(--text-secondary)", fontWeight: 600, fontSize: "0.75rem", width: "210px" }}></th>
-                  <th style={{ padding: "0.75rem 1rem", color: "var(--text-secondary)", fontWeight: 600, fontSize: "0.75rem" }}>Track</th>
-                  <th style={{ padding: "0.75rem 1rem", color: "var(--text-secondary)", fontWeight: 600, fontSize: "0.75rem" }}>Artist</th>
-                  <th style={{ padding: "0.75rem 1rem", color: "var(--text-secondary)", fontWeight: 600, fontSize: "0.75rem", width: "60px" }}>BPM</th>
-                  <th style={{ padding: "0.75rem 1rem", color: "var(--text-secondary)", fontWeight: 600, fontSize: "0.75rem", width: "60px" }}>Pop</th>
-                  <th style={{ padding: "0.75rem 1rem", color: "var(--text-secondary)", fontWeight: 600, fontSize: "0.75rem" }}>Why</th>
+                <tr>
+                  <th className={styles.colIndex}>#</th>
+                  <th className={styles.colActions}></th>
+                  <th>Track</th>
+                  <th>Artist</th>
+                  <th className={styles.colBpm}>BPM</th>
+                  <th className={styles.colPop}>Pop</th>
+                  <th>Why</th>
                 </tr>
               </thead>
               <tbody>
@@ -742,35 +746,34 @@ export default function BuilderPage() {
                     onDragStart={() => setDraggedTrackId(track.id)}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={() => moveDraggedTrack(track.id)}
-                    style={{ borderBottom: "1px solid var(--border-subtle)" }}
                   >
-                    <td style={{ padding: "0.75rem 1rem", color: "var(--text-muted)", fontSize: "0.875rem" }}>{idx + 1}</td>
-                    <td style={{ padding: "0.75rem 0.25rem", color: "var(--text-muted)", fontSize: "0.875rem", whiteSpace: "nowrap" }}>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", alignItems: "center" }}>
-                        <button title="Drag row" style={iconButtonStyle}><GripVertical size={14} /></button>
-                        <button title={pinnedTrackIds.includes(track.id) ? "Unpin" : "Pin"} onClick={() => togglePin(track.id)} style={{ ...iconButtonStyle, color: pinnedTrackIds.includes(track.id) ? "var(--accent-yellow)" : "var(--text-muted)" }}><Pin size={14} /></button>
-                        <button title="Remove from this preview" onClick={() => removeTrack(track.id)} style={iconButtonStyle}><X size={14} /></button>
+                    <td style={{ color: "var(--faint)" }}>{idx + 1}</td>
+                    <td>
+                      <div className={styles.actionGroup}>
+                        <button title="Drag row" className={styles.btnIcon}><GripVertical size={14} /></button>
+                        <button title={pinnedTrackIds.includes(track.id) ? "Unpin" : "Pin"} onClick={() => togglePin(track.id)} className={`${styles.btnIcon} ${pinnedTrackIds.includes(track.id) ? styles.pinActive : ""}`}><Pin size={14} /></button>
+                        <button title="Remove from this preview" onClick={() => removeTrack(track.id)} className={styles.btnIcon}><X size={14} /></button>
                         <TrackPreviewButton trackId={track.id} />
                         <BlockTrackButton trackId={track.id} onBlocked={removeTrack} />
                       </div>
                     </td>
-                    <td style={{ padding: "0.75rem 1rem", fontWeight: 500, fontSize: "0.875rem" }}>
+                    <td className={styles.trackTitle}>
                       {track.title}
                       {(track.isLive || track.isRemaster || track.isExplicit) && (
-                        <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.35rem", flexWrap: "wrap" }}>
-                          {track.isLive && <span style={miniBadgeStyle}>Live</span>}
-                          {track.isRemaster && <span style={miniBadgeStyle}>Remaster</span>}
-                          {track.isExplicit && <span style={miniBadgeStyle}>Explicit</span>}
+                        <div className={styles.badgeRow}>
+                          {track.isLive && <span className={styles.miniBadge}>Live</span>}
+                          {track.isRemaster && <span className={styles.miniBadge}>Remaster</span>}
+                          {track.isExplicit && <span className={styles.miniBadge}>Explicit</span>}
                         </div>
                       )}
                     </td>
-                    <td style={{ padding: "0.75rem 1rem", color: "var(--text-secondary)", fontSize: "0.875rem" }}>{track.artist?.title}</td>
-                    <td style={{ padding: "0.75rem 1rem", color: "var(--accent-primary)", fontSize: "0.875rem", fontWeight: 600 }}>
+                    <td className={styles.trackArtist}>{track.artist?.title}</td>
+                    <td className={styles.trackBpm}>
                       {track.audioFeature?.tempo?.toFixed(0) || "-"}
-                      {track.metadataConfidence?.audio?.tempoLabel && <div style={{ color: "var(--text-muted)", fontSize: "0.65rem", fontWeight: 500 }}>{track.metadataConfidence.audio.tempoLabel}</div>}
+                      {track.metadataConfidence?.audio?.tempoLabel && <div className={styles.trackBpmLabel}>{track.metadataConfidence.audio.tempoLabel}</div>}
                     </td>
-                    <td style={{ padding: "0.75rem 1rem", color: "var(--accent-yellow)", fontSize: "0.875rem", fontWeight: 600 }}>{track.popularity?.score?.toFixed(0) || "-"}</td>
-                    <td style={{ padding: "0.75rem 1rem", color: "var(--text-muted)", fontSize: "0.75rem", maxWidth: "220px" }}>
+                    <td className={styles.trackPop}>{track.popularity?.score?.toFixed(0) || "-"}</td>
+                    <td className={styles.trackWhy}>
                       {(track.matchReasons || []).slice(0, 2).join(" | ") || "Matched selected rules"}
                     </td>
                   </tr>
@@ -779,17 +782,17 @@ export default function BuilderPage() {
             </table>
           )}
         </div>
-        <div style={{ textAlign: "right", fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+        <div className={styles.previewCount}>
           {tracks.length} tracks matched
         </div>
         {history.length > 0 && (
-          <div style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: "1rem" }}>
-            <h4 style={{ margin: "0 0 0.75rem 0", fontSize: "0.875rem" }}>Recent Playlist History</h4>
-            <div style={{ display: "grid", gap: "0.5rem", maxHeight: "150px", overflow: "auto" }}>
+          <div className={styles.historySection}>
+            <h4>Recent Playlist History</h4>
+            <div className={styles.historyList}>
               {history.slice(0, 5).map((item) => (
-                <div key={item.id} style={{ display: "flex", justifyContent: "space-between", gap: "1rem", color: "var(--text-secondary)", fontSize: "0.75rem" }}>
+                <div key={item.id} className={styles.historyItem}>
                   <span>{item.name} ({item.trackCount})</span>
-                  <span style={{ color: item.status === "success" ? "#22c55e" : "#ef4444" }}>{item.status}</span>
+                  <span className={item.status === "success" ? styles.historySuccess : styles.historyFail}>{item.status}</span>
                 </div>
               ))}
             </div>
@@ -799,59 +802,3 @@ export default function BuilderPage() {
     </div>
   );
 }
-
-const inputStyle = {
-  background: "var(--bg-base)",
-  border: "1px solid var(--border-subtle)",
-  color: "var(--text-primary)",
-  padding: "0.5rem 0.75rem",
-  borderRadius: "var(--radius-sm)",
-  fontSize: "0.875rem",
-  outline: "none"
-};
-
-const optionLabelStyle = {
-  display: "grid",
-  gap: "0.35rem",
-  color: "var(--text-secondary)",
-  fontSize: "0.75rem",
-};
-
-const checkStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: "0.4rem",
-  color: "var(--text-secondary)",
-  fontSize: "0.75rem",
-};
-
-const iconButtonStyle = {
-  background: "transparent",
-  border: "none",
-  color: "inherit",
-  cursor: "pointer",
-  padding: "0.2rem",
-};
-
-const miniBadgeStyle = {
-  border: "1px solid var(--border-subtle)",
-  color: "var(--text-muted)",
-  borderRadius: "var(--radius-sm)",
-  padding: "0.1rem 0.3rem",
-  fontSize: "0.65rem",
-  fontWeight: 500,
-};
-
-const btnStyle = (color: string) => ({
-  background: `rgba(255,255,255,0.05)`,
-  border: `1px solid ${color}`,
-  color: color,
-  padding: "0.4rem 0.75rem",
-  borderRadius: "var(--radius-full)",
-  cursor: "pointer",
-  fontSize: "0.75rem",
-  fontWeight: 600,
-  display: "flex",
-  alignItems: "center",
-  gap: "0.25rem",
-});

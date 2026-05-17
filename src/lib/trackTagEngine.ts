@@ -1,5 +1,5 @@
 import prisma from "./prisma";
-import { getLastFmTrackTags } from "./providers/lastfm";
+import { resolveTrackGenreTags } from "./trackTagProviders";
 import { resolveDelayMs, resolveLimit, type SyncEngineOptions } from "./syncSettings";
 import {
   engineBatchSize,
@@ -54,7 +54,9 @@ export const runTrackTagEngine = async (options: SyncEngineOptions = {}): Promis
       let outcome: "success" | "not_found" | "rate_limited" | "error" = "success";
       const endTimer = trackDurationSeconds.startTimer({ engine: ENGINE });
       try {
-        const tags = await getLastFmTrackTags(track.artist.title, track.title);
+        let shouldMarkSynced = true;
+        const tagResolution = await resolveTrackGenreTags(track.artist.title, track.title);
+        const tags = tagResolution.tags;
 
         if (tags.length > 0) {
           // Connect or create each tag and link to the track
@@ -78,19 +80,30 @@ export const runTrackTagEngine = async (options: SyncEngineOptions = {}): Promis
               }
             });
           }
-          console.log(`[TrackTagEngine] Track "${track.title}" -> Tags: ${tags.join(", ")}`);
+          console.log(`[TrackTagEngine] Track "${track.title}" -> Tags: ${tags.join(", ")} (${tagResolution.provider})`);
+        } else if (tagResolution.rateLimited) {
+          outcome = "rate_limited";
+          shouldMarkSynced = false;
+          console.warn(
+            `[TrackTagEngine] Rate limited while looking up "${track.artist.title} - ${track.title}"; leaving it queued.`,
+          );
         } else {
           // No tags returned. We still bump tagsSyncedAt below, and the
           // retry filter above will re-pick this up after RETRY_AFTER_DAYS
           // if it still has no genre tags.
           outcome = "not_found";
+          if (tagResolution.attemptedProviders.length === 0) {
+            console.warn("[TrackTagEngine] No track tag providers are configured.");
+          }
         }
 
         // Mark track as synced
-        await prisma.track.update({
-          where: { id: track.id },
-          data: { tagsSyncedAt: new Date() }
-        });
+        if (shouldMarkSynced) {
+          await prisma.track.update({
+            where: { id: track.id },
+            data: { tagsSyncedAt: new Date() }
+          });
+        }
 
       } catch (e: any) {
         console.error(`[TrackTagEngine] Unexpected error on track ${track.title}:`, e.message);

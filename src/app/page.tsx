@@ -21,7 +21,7 @@ export default async function Home() {
     <>
       <header className={styles.header}>
         <h2>Dashboard</h2>
-        <p>Your music at a glance</p>
+        <p>Library overview</p>
       </header>
 
       {user ? (
@@ -35,9 +35,9 @@ export default async function Home() {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2rem", marginBottom: "3rem" }}>
           <div className="glass-panel" style={{ padding: "2rem", textAlign: "center", borderRadius: "var(--radius-lg)", width: "100%", maxWidth: "600px" }}>
-            <h3 style={{ margin: "0 0 1rem 0", fontSize: "1.5rem" }}>Welcome to Mixarr</h3>
+            <h3 style={{ margin: "0 0 1rem 0", fontSize: "1.5rem" }}>Mixarr</h3>
             <p style={{ color: "var(--text-secondary)", marginBottom: "2rem" }}>
-              Sign in with your Plex account to import your music library and start building smart playlists.
+              Sign in with Plex to import your library and start building curated playlists.
             </p>
             {/* @ts-ignore - The component is client-side but we render it here */}
             <div style={{ display: "flex", justifyContent: "center" }}>
@@ -49,17 +49,17 @@ export default async function Home() {
             <div className={styles.card}>
               <Wand2 size={24} className={styles.cardIcon} />
               <h3>Build Playlist</h3>
-              <p>Create a smart playlist with filters</p>
+              <p>Create a playlist with rules</p>
             </div>
 
             <div className={styles.card}>
-              <ListMusic size={24} className={`${styles.cardIcon} ${styles.blue}`} />
+              <ListMusic size={24} className={styles.cardIcon} />
               <h3>Browse Library</h3>
-              <p>Explore your music collection</p>
+              <p>Explore your collection</p>
             </div>
 
             <div className={styles.card}>
-              <ListMusic size={24} className={`${styles.cardIcon} ${styles.yellow}`} />
+              <ListMusic size={24} className={styles.cardIcon} />
               <h3>My Playlists</h3>
               <p>0 playlists created</p>
             </div>
@@ -79,7 +79,7 @@ export default async function Home() {
             </div>
             <div>
               <h4>Create your first mix</h4>
-              <p>Click Build Playlist to get started</p>
+              <p>Open the builder to get started</p>
             </div>
           </div>
         </div>

@@ -18,6 +18,16 @@ function classifyError(error: any): "timeout" | "rate_limited" | "error" {
   return "error";
 }
 
+const truthyEnv = (value: string | undefined) => {
+  const normalized = value?.toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+};
+
+export const isSpotifyTagLookupEnabled = () => {
+  return truthyEnv(process.env.SPOTIFY_TAGS_ENABLED) &&
+    Boolean(process.env.SPOTIFY_CLIENT_ID && process.env.SPOTIFY_CLIENT_SECRET);
+};
+
 // Key used in the SystemState table for the Spotify rate-limit backoff
 // expiry. Persisting this is what makes a container restart respect a
 // multi-hour 429 Retry-After instead of forgetting it and immediately
@@ -172,6 +182,87 @@ export const getSpotifyPopularity = async (artist: string, track: string): Promi
 
     console.error(`Spotify fetch failed for ${artist} - ${track}:`, error.message, status || '');
     return null;
+  } finally {
+    endTimer();
+    providerRequestsTotal.inc({ provider: PROVIDER, result });
+  }
+};
+
+export const getSpotifyTrackTags = async (artist: string, track: string): Promise<string[]> => {
+  if (!isSpotifyTagLookupEnabled()) return [];
+
+  const endTimer = providerRequestDurationSeconds.startTimer({ provider: PROVIDER });
+  let result: Outcome = "success";
+
+  try {
+    const token = await getSpotifyToken();
+    if (!token) {
+      result = "rate_limited";
+      throw new Error("RATE_LIMIT:spotify_unavailable");
+    }
+
+    const query = `artist:${artist} track:${track}`;
+    const searchRes = await axios.get("https://api.spotify.com/v1/search", {
+      params: {
+        q: query,
+        type: "track",
+        limit: 1,
+      },
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      timeout: REQUEST_TIMEOUT_MS,
+    });
+
+    const artistIds = searchRes.data?.tracks?.items?.[0]?.artists
+      ?.map((entry: any) => entry?.id)
+      ?.filter((id: unknown): id is string => typeof id === "string");
+
+    if (!artistIds?.length) {
+      result = "not_found";
+      return [];
+    }
+
+    // Spotify exposes artist genres, not track genres. This stays opt-in
+    // because the artist genre field is deprecated in the current Web API.
+    const artistRes = await axios.get("https://api.spotify.com/v1/artists", {
+      params: {
+        ids: artistIds.slice(0, 5).join(","),
+      },
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      timeout: REQUEST_TIMEOUT_MS,
+    });
+
+    const tags = (artistRes.data?.artists || []).flatMap((spotifyArtist: any) =>
+      Array.isArray(spotifyArtist?.genres) ? spotifyArtist.genres : [],
+    );
+
+    if (tags.length === 0) result = "not_found";
+    return tags;
+  } catch (error: any) {
+    if (error.message === "NO_TOKEN" || (error.message && error.message.startsWith("RATE_LIMIT"))) {
+      result = "rate_limited";
+      throw error;
+    }
+
+    result = classifyError(error);
+    const status = error.response?.status;
+    if (status === 429) {
+      const retryAfter = Number(error.response?.headers['retry-after']) || 5;
+      setTokenFailureTime(Date.now() + (retryAfter * 1000));
+      console.warn(`[Spotify] Tag lookup rate limited. Backing off for ${retryAfter}s...`);
+      throw new Error(`RATE_LIMIT:${retryAfter}`);
+    }
+
+    if (status === 403) {
+      console.warn(`[Spotify] Tag lookup returned 403 Forbidden for ${track}.`);
+      return [];
+    }
+
+    console.error(`[Spotify] Tag lookup failed for ${artist} - ${track}:`, error.message, status || '');
+    return [];
   } finally {
     endTimer();
     providerRequestsTotal.inc({ provider: PROVIDER, result });

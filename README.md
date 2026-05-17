@@ -10,6 +10,7 @@
 - **Smart Metadata Enrichment**: 
   - Analyzes the "feel" of your music by mapping raw data into **Energy (0.0-1.0)**, **Valence/Mood (0.0-1.0)**, and exact **BPM (Tempo)** scores using **AudioDB** and **Deezer**.
   - Calculates global **Popularity** scores using **Last.fm** and **Deezer**.
+  - Enriches track genre tags through **MusicBrainz**, opt-in **Discogs**/**Spotify**, and **Last.fm** only as the final fallback.
 - **Dynamic Rule Builder**: Create complex queries instantly. Find tracks where `Genre CONTAINS "Rock"`, `Energy > 0.8`, and `Popularity < 40`—all processed entirely locally.
 - **Push to Plex**: Seamlessly export your generated mixes straight back to your Plex Media Server.
 - **Premium UI / UX**: A gorgeous "Glassmorphic" interface powered by Next.js, featuring an animated floating mesh gradient, crisp typography (Google Inter & Outfit), and satisfying micro-animations.
@@ -40,7 +41,7 @@
 ## Getting Started
 
 1. Clone this repository.
-2. Duplicate `.env.example` to `.env` and fill in your API keys (Last.fm, Plex Client Identifier).
+2. Duplicate `.env.example` to `.env` and fill in your API keys (Plex Client Identifier, Discogs/Last.fm/Spotify as needed).
 3. Spin up the entire stack using Docker:
 
 ```bash

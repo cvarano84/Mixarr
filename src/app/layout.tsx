@@ -1,18 +1,22 @@
 import type { Metadata } from "next";
-import { Inter, Outfit } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
 import { cookies } from "next/headers";
 import prisma from "@/lib/prisma";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
-const outfit = Outfit({ subsets: ["latin"], variable: "--font-outfit" });
 
 export const metadata: Metadata = {
-  title: "Mixarr - Smart Playlist Engine",
-  description: "Create highly customizable Plex music playlists",
+  title: "Mixarr",
+  description: "Plex playlist curator",
   icons: {
-    icon: '/icon.svg',
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+    ],
+    apple: [
+      { url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
+    ],
   },
   appleWebApp: {
     capable: true,
@@ -38,7 +42,7 @@ export default async function RootLayout({
 
   return (
     <html lang="en">
-      <body className={`${inter.variable} ${outfit.variable}`} style={{ fontFamily: "var(--font-inter), sans-serif" }}>
+      <body className={inter.variable}>
 
         {/* Animated Mesh Gradient Background */}
         <div className="mesh-bg">

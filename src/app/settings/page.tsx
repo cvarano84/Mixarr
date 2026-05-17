@@ -2,29 +2,54 @@ import { Settings as SettingsIcon, Database, Key, Server, RefreshCw } from "luci
 import ProviderTestButton from "@/components/ProviderTestButton";
 import LibraryDefaultSelector from "@/components/LibraryDefaultSelector";
 import SyncOptionsForm from "@/components/SyncOptionsForm";
+import styles from "./settings.module.css";
 
 export default function SettingsPage() {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "2rem", height: "100%", maxWidth: "800px", margin: "0 auto" }}>
-      <header>
-        <h2 style={{ fontSize: "2rem", fontWeight: 700, margin: "0 0 0.5rem 0", display: "flex", alignItems: "center", gap: "0.75rem" }}>
-          <SettingsIcon size={32} color="var(--accent-primary)" /> Settings
+    <div className={styles.wrapper}>
+      <header className={styles.header}>
+        <h2>
+          <SettingsIcon size={28} color="var(--accent)" /> Settings
         </h2>
-        <p style={{ color: "var(--text-secondary)", margin: 0 }}>Manage your application configuration and connections.</p>
+        <p>Manage your configuration and connections.</p>
       </header>
 
       {/* API Keys & Integrations */}
-      <section className="glass-panel" style={{ padding: "1.5rem", borderRadius: "var(--radius-lg)" }}>
-        <h3 style={{ margin: "0 0 1rem 0", fontSize: "1.25rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-          <Key size={20} color="var(--accent-blue)" /> External APIs
+      <section className={`glass-panel ${styles.section}`}>
+        <h3 className={styles.sectionTitle}>
+          <Key size={20} color="var(--info)" /> External APIs
         </h3>
-        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+        <div className={styles.providerList}>
           <ProviderTestButton 
             provider="spotify"
             title="Spotify Audio Features"
             description="Used for high-precision energy and valence analysis."
             badgeText="Configured via .env"
             badgeColor="#22c55e"
+          />
+
+          <ProviderTestButton
+            provider="discogs-tags"
+            title="Discogs Genre Tags"
+            description="Opt-in source for release genre and style tags using Discogs Consumer Key and Secret."
+            badgeText="Opt-in"
+            badgeColor="#eab308"
+          />
+
+          <ProviderTestButton
+            provider="musicbrainz-tags"
+            title="MusicBrainz Genre Tags"
+            description="Free genre and tag lookup with a required User-Agent and conservative rate limit."
+            badgeText="No API key"
+            badgeColor="#22c55e"
+          />
+
+          <ProviderTestButton
+            provider="spotify-tags"
+            title="Spotify Artist Genres"
+            description="Optional artist-genre source; enable only after confirming your Spotify policy fit."
+            badgeText="Opt-in"
+            badgeColor="#eab308"
           />
           
           <ProviderTestButton 
@@ -43,6 +68,14 @@ export default function SettingsPage() {
             badgeColor="#22c55e"
           />
 
+          <ProviderTestButton
+            provider="lastfm-tags"
+            title="Last.fm Tag Fallback"
+            description="Final genre-tag fallback after Discogs, MusicBrainz, and optional Spotify do not return tags."
+            badgeText="Fallback only"
+            badgeColor="#eab308"
+          />
+
           <ProviderTestButton 
             provider="deezer"
             title="Deezer Popularity"
@@ -54,11 +87,11 @@ export default function SettingsPage() {
       </section>
 
       {/* Plex Connection */}
-      <section className="glass-panel" style={{ padding: "1.5rem", borderRadius: "var(--radius-lg)" }}>
-        <h3 style={{ margin: "0 0 1rem 0", fontSize: "1.25rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-          <Server size={20} color="var(--accent-yellow)" /> Plex Identity
+      <section className={`glass-panel ${styles.section}`}>
+        <h3 className={styles.sectionTitle}>
+          <Server size={20} color="var(--warning)" /> Plex Identity
         </h3>
-        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+        <div className={styles.providerList}>
           <ProviderTestButton 
             provider="plex"
             title="Local Plex Server"
@@ -66,72 +99,46 @@ export default function SettingsPage() {
             badgeText="OAuth Linked"
             badgeColor="#eab308"
           />
-          <div>
-            <label style={{ display: "block", fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: "0.25rem" }}>Client Identifier</label>
-            <input type="text" readOnly value={process.env.PLEX_CLIENT_IDENTIFIER || "Not Set"} style={inputStyle} />
+          <div className={styles.field}>
+            <label>Client Identifier</label>
+            <input type="text" readOnly value={process.env.PLEX_CLIENT_IDENTIFIER || "Not Set"} className={styles.readonlyInput} />
           </div>
-          <div>
-            <label style={{ display: "block", fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: "0.25rem" }}>Product Name</label>
-            <input type="text" readOnly value={process.env.PLEX_PRODUCT_NAME || "Mixarr"} style={inputStyle} />
+          <div className={styles.field}>
+            <label>Product Name</label>
+            <input type="text" readOnly value={process.env.PLEX_PRODUCT_NAME || "Mixarr"} className={styles.readonlyInput} />
           </div>
-          <div style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: "1rem" }}>
-            <h4 style={{ margin: "0 0 0.75rem 0", fontSize: "1rem" }}>Default Playlist Source</h4>
+          <div className={styles.divider}>
+            <h4>Default Playlist Source</h4>
             <LibraryDefaultSelector />
           </div>
         </div>
       </section>
 
       {/* Sync Controls */}
-      <section className="glass-panel" style={{ padding: "1.5rem", borderRadius: "var(--radius-lg)" }}>
-        <h3 style={{ margin: "0 0 0.5rem 0", fontSize: "1.25rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-          <RefreshCw size={20} color="var(--accent-primary)" /> Sync Controls
+      <section className={`glass-panel ${styles.section}`}>
+        <h3 className={styles.sectionTitle}>
+          <RefreshCw size={20} color="var(--accent)" /> Sync Controls
         </h3>
-        <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", margin: "0 0 1.25rem 0" }}>
+        <p className={styles.sectionDesc}>
           Tune how much metadata each manual sync run processes. Leave a field empty to remove that batch cap.
         </p>
         <SyncOptionsForm />
       </section>
 
       {/* Database Management */}
-      <section className="glass-panel" style={{ padding: "1.5rem", borderRadius: "var(--radius-lg)", border: "1px solid rgba(239, 68, 68, 0.2)" }}>
-        <h3 style={{ margin: "0 0 1rem 0", fontSize: "1.25rem", display: "flex", alignItems: "center", gap: "0.5rem", color: "#ef4444" }}>
+      <section className={styles.dangerSection}>
+        <h3>
           <Database size={20} /> Data Management
         </h3>
-        <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: "1.5rem" }}>
+        <p className={styles.sectionDesc}>
           These actions are performed automatically by the background engines, but you can manually trigger them or completely reset your cache if needed.
         </p>
-        
-        <div style={{ display: "flex", gap: "1rem" }}>
-          <button style={dangerBtnStyle}>
+        <div className={styles.dangerActions}>
+          <button className={styles.dangerBtn}>
             Reset Database Cache
           </button>
         </div>
       </section>
-
     </div>
   );
 }
-
-const inputStyle = {
-  background: "rgba(0,0,0,0.2)",
-  border: "1px solid var(--border-subtle)",
-  color: "var(--text-primary)",
-  padding: "0.75rem",
-  borderRadius: "var(--radius-sm)",
-  fontSize: "0.875rem",
-  width: "100%",
-  outline: "none",
-  cursor: "not-allowed"
-};
-
-const dangerBtnStyle = {
-  background: "rgba(239, 68, 68, 0.1)",
-  border: "1px solid rgba(239, 68, 68, 0.3)",
-  color: "#ef4444",
-  padding: "0.75rem 1.5rem",
-  borderRadius: "var(--radius-md)",
-  cursor: "not-allowed",
-  fontSize: "0.875rem",
-  fontWeight: 600,
-  opacity: 0.7
-};

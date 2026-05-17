@@ -1,52 +1,81 @@
 :root {
-  /* Dynamic Background Colors */
-  --bg-base: #09090b;
-  --bg-surface: rgba(24, 24, 27, 0.65);
-  --bg-surface-hover: rgba(39, 39, 42, 0.85);
-  
-  --text-primary: #f8fafc;
-  --text-secondary: #a1a1aa;
-  --text-muted: #71717a;
-  
-  /* Vibrant Accents */
-  --accent-primary: #8b5cf6;
-  --accent-primary-hover: #a78bfa;
-  
-  --accent-blue: #3b82f6;
-  --accent-blue-hover: #60a5fa;
-  
-  --accent-yellow: #f59e0b;
-  
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.15);
-  
+  color-scheme: dark;
+
+  /* Background */
+  --bg: #0d0d10;
+  --panel: #141418;
+  --panel-hover: #1b1b22;
+
+  /* Text */
+  --fg: #e4e2e8;
+  --muted: #8b8a93;
+  --faint: #5c5b64;
+
+  /* Accent — muted indigo, Lidarr-inspired */
+  --accent: #7c6ff7;
+  --accent-hover: #9488f9;
+  --accent-dim: rgba(124, 111, 247, 0.10);
+
+  /* Semantic */
+  --danger: #d75b5b;
+  --warning: #f2b52e;
+  --info: #35aeea;
+
+  /* Borders */
+  --line: rgba(255, 255, 255, 0.06);
+  --line-strong: rgba(255, 255, 255, 0.10);
+
+  /* Radii */
   --radius-sm: 0.5rem;
   --radius-md: 0.75rem;
-  --radius-lg: 1.25rem;
-  --radius-xl: 1.5rem;
-  
-  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+
+  /* Shadow */
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
-* {
+/* ---- Legacy variable aliases — keep existing code working ---- */
+:root {
+  --bg-base: var(--bg);
+  --bg-surface: var(--panel);
+  --bg-surface-hover: var(--panel-hover);
+  --text-primary: var(--fg);
+  --text-secondary: var(--muted);
+  --text-muted: var(--faint);
+  --accent-primary: var(--accent);
+  --accent-primary-hover: var(--accent-hover);
+  --accent-blue: var(--info);
+  --accent-blue-hover: #5bc0f0;
+  --accent-yellow: var(--warning);
+  --border-subtle: var(--line);
+  --border-strong: var(--line-strong);
+  --glass-shadow: var(--shadow);
+}
+
+/* ---- Reset ---- */
+*, *::before, *::after {
   box-sizing: border-box;
-  padding: 0;
   margin: 0;
+  padding: 0;
 }
 
 html, body {
   max-width: 100vw;
   overflow-x: hidden;
-  background-color: var(--bg-base);
-  color: var(--text-primary);
-  font-family: var(--font-inter), sans-serif;
-  letter-spacing: -0.02em;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: var(--font-outfit), sans-serif;
-  letter-spacing: -0.04em;
-  font-weight: 700;
+  font-family: inherit;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--fg);
 }
 
 a {
@@ -54,104 +83,97 @@ a {
   text-decoration: none;
 }
 
-/* --- Animated Mesh Gradient Background --- */
+/* ---- Subtle ambient background (barely visible texture) ---- */
 .mesh-bg {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
+  inset: 0;
   z-index: 0;
   overflow: hidden;
-  background: var(--bg-base);
+  background: var(--bg);
   pointer-events: none;
 }
 
 .mesh-blob-1, .mesh-blob-2 {
   position: absolute;
-  filter: blur(100px);
   border-radius: 50%;
-  opacity: 0.4;
-  animation: blob-float 20s infinite alternate ease-in-out;
+  filter: blur(80px);
+  opacity: 0.12;
+  animation: drift 40s infinite alternate ease-in-out;
 }
 
 .mesh-blob-1 {
   width: 600px;
   height: 600px;
-  background: radial-gradient(circle, var(--accent-primary) 0%, rgba(139,92,246,0) 70%);
-  top: -100px;
-  left: -100px;
+  background: radial-gradient(circle, var(--accent) 0%, transparent 70%);
+  top: -150px;
+  left: -150px;
 }
 
 .mesh-blob-2 {
-  width: 800px;
-  height: 800px;
-  background: radial-gradient(circle, var(--accent-blue) 0%, rgba(59,130,246,0) 70%);
-  bottom: -200px;
+  width: 700px;
+  height: 700px;
+  background: radial-gradient(circle, var(--info) 0%, transparent 70%);
+  bottom: -250px;
   right: -200px;
-  animation-delay: -10s;
+  animation-delay: -20s;
 }
 
-@keyframes blob-float {
-  0% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(100px, 50px) scale(1.2); }
-  100% { transform: translate(-50px, 150px) scale(0.9); }
+@keyframes drift {
+  0%   { transform: translate(0, 0) scale(1); }
+  50%  { transform: translate(60px, 30px) scale(1.15); }
+  100% { transform: translate(-30px, -40px) scale(0.95); }
 }
 
-/* --- Glassmorphism Utilities --- */
+/* ---- Panels ---- */
 .glass-panel {
-  background: var(--bg-surface) !important;
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
-  border: 1px solid var(--border-subtle) !important;
-  box-shadow: var(--glass-shadow);
+  background: rgba(20, 20, 24, 0.92) !important;
+  backdrop-filter: blur(8px) saturate(120%);
+  -webkit-backdrop-filter: blur(8px) saturate(120%);
+  border: 1px solid var(--line) !important;
+  box-shadow: var(--shadow);
 }
 
-/* --- Transitions & Micro-Animations --- */
+/* ---- Transitions ---- */
 button, a, input, select {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 button:active {
-  transform: translateY(0);
+  transform: none;
 }
 
-/* Input Focus Glow */
-input:focus, select:focus {
-  border-color: var(--accent-primary) !important;
-  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+/* Focus ring */
+input:focus, select:focus, button:focus-visible {
+  outline: none;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px var(--accent-dim);
 }
 
-/* Table rows smooth hover */
+/* Table rows */
 tr {
-  transition: background-color 0.2s ease;
+  transition: background-color 0.15s ease;
 }
 tr:hover {
-  background-color: rgba(255, 255, 255, 0.03);
+  background-color: rgba(255, 255, 255, 0.025);
 }
 
-/* Custom Scrollbar */
+/* ---- Scrollbar ---- */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.12);
 }
 
-/* --- Layout Wrappers --- */
+/* ---- Layout ---- */
 .app-container {
   display: flex;
   min-height: 100vh;
@@ -161,21 +183,19 @@ tr:hover {
 
 .main-content {
   flex: 1;
-  padding: 2.5rem 3rem;
+  padding: 2rem 2.5rem;
   height: 100vh;
   overflow-y: auto;
-  padding-bottom: 2.5rem;
+  padding-bottom: 2rem;
 }
 
-/* --- Responsive Media Queries --- */
 @media (max-width: 768px) {
   .app-container {
     flex-direction: column;
   }
-  
   .main-content {
-    padding: 1.5rem 1rem;
-    padding-bottom: 100px; /* Leave space for bottom nav */
+    padding: 1.25rem 1rem;
+    padding-bottom: 100px;
     height: auto;
     min-height: 100vh;
     overflow-y: visible;
@@ -184,7 +204,7 @@ tr:hover {
 
 .builder-container {
   display: flex;
-  gap: 2rem;
+  gap: 1.5rem;
   height: 100%;
 }
 
@@ -205,9 +225,9 @@ tr:hover {
   flex: 1;
   overflow-x: auto;
   overflow-y: auto;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  background: var(--bg-base);
+  background: var(--bg);
 }
 
 @media (max-width: 768px) {

@@ -106,7 +106,7 @@ const createMetricsBundle = () => {
 
     /**
      * Per-request outcome counter for each upstream provider API.
-     *   provider: audiodb | deezer | lastfm | spotify
+     *   provider: audiodb | deezer | discogs | lastfm | musicbrainz | spotify
      *   result: success | not_found | timeout | rate_limited | error
      */
     providerRequestsTotal: new Counter({
@@ -331,7 +331,7 @@ const globalForMetrics = globalThis as unknown as {
 // ---------------------------------------------------------------------------
 const ENGINES = ["popularity", "audio_feature", "bpm", "tags"] as const;
 const ENGINE_RESULTS = ["success", "not_found", "rate_limited", "error"] as const;
-const PROVIDERS = ["audiodb", "deezer", "lastfm", "spotify"] as const;
+const PROVIDERS = ["audiodb", "deezer", "discogs", "lastfm", "musicbrainz", "spotify"] as const;
 const PROVIDER_RESULTS = ["success", "not_found", "timeout", "rate_limited", "error"] as const;
 const SYNC_RESULTS = ["success", "failed"] as const;
 const PIPELINE_RESULTS = ["success", "failed", "timeout", "skipped"] as const;

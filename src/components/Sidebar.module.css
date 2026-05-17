@@ -1,9 +1,9 @@
 .sidebar {
   width: 250px;
-  background-color: var(--bg-surface);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
-  border-right: 1px solid var(--border-subtle);
+  background: rgba(20, 20, 24, 0.95);
+  backdrop-filter: blur(8px) saturate(120%);
+  -webkit-backdrop-filter: blur(8px) saturate(120%);
+  border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
   padding: 1.5rem;
@@ -12,7 +12,7 @@
   top: 0;
   height: 100vh;
   z-index: 50;
-  box-shadow: 4px 0 24px rgba(0,0,0,0.4);
+  box-shadow: 1px 0 12px rgba(0, 0, 0, 0.3);
 }
 
 @media (max-width: 768px) {
@@ -26,8 +26,8 @@
     flex-direction: row;
     padding: 0.5rem;
     border-right: none;
-    border-top: 1px solid var(--border-subtle);
-    box-shadow: 0 -4px 24px rgba(0,0,0,0.4);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
     align-items: center;
     justify-content: space-around;
     z-index: 100;
@@ -48,8 +48,8 @@
 }
 
 .logoIcon {
-  background: linear-gradient(135deg, var(--accent-primary), #d946ef);
-  color: white;
+  background: linear-gradient(135deg, var(--accent), #5b4fcf);
+  color: #fff;
   width: 40px;
   height: 40px;
   border-radius: var(--radius-md);
@@ -66,14 +66,14 @@
 
 .logoSubtitle {
   font-size: 0.75rem;
-  color: var(--text-secondary);
+  color: var(--muted);
   margin: 0;
 }
 
 .nav {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.25rem;
   flex: 1;
 }
 
@@ -90,11 +90,12 @@
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.75rem 1rem;
-  border-radius: var(--radius-md);
-  color: var(--text-secondary);
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
   font-weight: 500;
-  transition: all 0.2s;
+  font-size: 0.9rem;
+  transition: background-color 0.15s ease, color 0.15s ease;
   text-decoration: none;
 }
 
@@ -114,21 +115,22 @@
 }
 
 .navItem:hover {
-  background-color: var(--bg-surface);
-  color: var(--text-primary);
+  background-color: rgba(255, 255, 255, 0.04);
+  color: var(--fg);
 }
 
 .navItem.active {
-  background-color: rgba(139, 92, 246, 0.1);
-  color: var(--accent-primary);
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .authStatus {
   margin-top: auto;
-  padding: 1rem;
-  background-color: var(--bg-surface);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-subtle);
+  padding: 0.85rem;
+  background: rgba(255, 255, 255, 0.025);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
 }
 
 @media (max-width: 768px) {
@@ -138,7 +140,7 @@
 }
 
 .authStatusText {
-  font-size: 0.875rem;
-  color: var(--text-secondary);
+  font-size: 0.8rem;
+  color: var(--muted);
   margin-bottom: 0.5rem;
 }

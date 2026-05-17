@@ -2,10 +2,16 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import prisma from "@/lib/prisma";
 import axios from "axios";
-import { getSpotifyPopularity } from "@/lib/providers/spotify";
+import {
+  getSpotifyPopularity,
+  getSpotifyTrackTags,
+  isSpotifyTagLookupEnabled,
+} from "@/lib/providers/spotify";
 import { getAudioDbFeatures } from "@/lib/providers/audiodb";
-import { getLastFmPopularity } from "@/lib/providers/lastfm";
+import { getLastFmPopularity, getLastFmTrackTags } from "@/lib/providers/lastfm";
 import { getDeezerPopularity } from "@/lib/providers/deezer";
+import { getDiscogsTrackTags, isDiscogsTagLookupEnabled } from "@/lib/providers/discogs";
+import { getMusicBrainzTrackTags } from "@/lib/providers/musicbrainz";
 
 export async function POST(req: Request) {
   const cookieStore = cookies();
@@ -54,6 +60,32 @@ export async function POST(req: Request) {
       const score = await getLastFmPopularity(artist, track);
       success = score !== null;
       message = success ? `Success: Fetched score ${score}` : "Failed to connect or authenticate.";
+    } else if (provider === "discogs-tags") {
+      if (!isDiscogsTagLookupEnabled()) {
+        success = false;
+        message = "Discogs tag lookup is disabled. Set DISCOGS_TAGS_ENABLED=1 with DISCOGS_CONSUMER_KEY and DISCOGS_CONSUMER_SECRET after confirming policy fit.";
+      } else {
+        const tags = await getDiscogsTrackTags(artist, track);
+        success = tags.length > 0;
+        message = success ? `Success: Fetched tags ${tags.slice(0, 5).join(", ")}` : "Failed to fetch Discogs tags.";
+      }
+    } else if (provider === "musicbrainz-tags") {
+      const tags = await getMusicBrainzTrackTags(artist, track);
+      success = tags.length > 0;
+      message = success ? `Success: Fetched tags ${tags.slice(0, 5).join(", ")}` : "Failed to fetch MusicBrainz tags.";
+    } else if (provider === "spotify-tags") {
+      if (!isSpotifyTagLookupEnabled()) {
+        success = false;
+        message = "Spotify tag lookup is disabled. Set SPOTIFY_TAGS_ENABLED=1 with Spotify credentials after confirming policy fit.";
+      } else {
+        const tags = await getSpotifyTrackTags(artist, track);
+        success = tags.length > 0;
+        message = success ? `Success: Fetched tags ${tags.slice(0, 5).join(", ")}` : "Failed to fetch Spotify artist genres.";
+      }
+    } else if (provider === "lastfm-tags") {
+      const tags = await getLastFmTrackTags(artist, track);
+      success = tags.length > 0;
+      message = success ? `Success: Fetched fallback tags ${tags.slice(0, 5).join(", ")}` : "Failed to fetch Last.fm tags.";
     } else if (provider === "deezer") {
       const score = await getDeezerPopularity(artist, track);
       success = score !== null;
