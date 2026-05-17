@@ -36,7 +36,7 @@ services:
       - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
       - POPULARITY_REFRESH_DAYS=${POPULARITY_REFRESH_DAYS:-30}
       - MAX_PLAYLIST_SIZE=${MAX_PLAYLIST_SIZE:-5000}
-      - LOCAL_BPM_SAMPLE_SECONDS=${LOCAL_BPM_SAMPLE_SECONDS:-180}
+      - LOCAL_BPM_SAMPLE_SECONDS=${LOCAL_BPM_SAMPLE_SECONDS:-60}
       - LOCAL_BPM_RETRY_DAYS=${LOCAL_BPM_RETRY_DAYS:-14}
       - LOCAL_BPM_CONFIDENCE_THRESHOLD=${LOCAL_BPM_CONFIDENCE_THRESHOLD:-0.75}
       - LOCAL_BPM_FFMPEG_PATH=${LOCAL_BPM_FFMPEG_PATH:-ffmpeg}
@@ -50,6 +50,20 @@ services:
     volumes:
       - mixarr_app_logs:/app/logs
 
+  #grafana:                       # Uncomment to add Grafana for monitoring. If you want Mixarr metrics, be sure to set METRICS_PORT above and in .env
+  #  image: grafana/grafana:latest
+  #  container_name: grafana
+  #  ports:
+  #    - "3000:3000"
+  #  volumes:
+  #    - grafana-storage:/var/lib/grafana
+  #  environment:
+  #    - GF_SECURITY_ADMIN_PASSWORD=admin # Change this for production
+  #  restart: unless-stopped
+
+
 volumes:
   mixarr_db_data:
   mixarr_app_logs:
+  #grafana-storage:                 # Uncomment to enable Grafana
+  
