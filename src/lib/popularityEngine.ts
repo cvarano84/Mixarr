@@ -19,8 +19,12 @@ const ENGINE = "popularity";
 const RETRY_AFTER_DAYS = 14;
 const RETRY_MS = RETRY_AFTER_DAYS * 24 * 60 * 60 * 1000;
 
-export const runPopularityEngine = async (options: SyncEngineOptions = {}) => {
+// One batch of popularity enrichment. Returns the number of tracks we
+// attempted, which the scheduler uses to know when the queue is drained.
+export const runPopularityEngine = async (options: SyncEngineOptions = {}): Promise<number> => {
   console.log("[PopularityEngine] Starting background popularity sync...");
+
+  let attempted = 0;
 
   try {
     const batchSize = resolveLimit(options.popularityBatchSize, "POPULARITY_BATCH_SIZE");
@@ -51,6 +55,7 @@ export const runPopularityEngine = async (options: SyncEngineOptions = {}) => {
     engineBatchSize.observe({ engine: ENGINE }, tracksToProcess.length);
 
     for (const track of tracksToProcess) {
+      attempted += 1;
       let score: number | null = null;
       let provider = "none";
       let confidence = 0;
@@ -150,9 +155,11 @@ export const runPopularityEngine = async (options: SyncEngineOptions = {}) => {
       }
     }
 
-    console.log("[PopularityEngine] Popularity sync batch completed!");
+    console.log(`[PopularityEngine] Popularity sync batch completed! (${attempted} attempted)`);
 
   } catch (error) {
     console.error("[PopularityEngine] Sync failed", error);
   }
+
+  return attempted;
 };

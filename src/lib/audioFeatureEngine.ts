@@ -19,8 +19,12 @@ const ENGINE = "audio_feature";
 const RETRY_AFTER_DAYS = 14;
 const RETRY_MS = RETRY_AFTER_DAYS * 24 * 60 * 60 * 1000;
 
-export const runAudioFeatureEngine = async (options: SyncEngineOptions = {}) => {
+// One batch of audio-feature enrichment. Returns the number of tracks we
+// attempted, which the scheduler uses to know when the queue is drained.
+export const runAudioFeatureEngine = async (options: SyncEngineOptions = {}): Promise<number> => {
   console.log("[AudioFeatureEngine] Starting background audio features sync...");
+
+  let attempted = 0;
 
   try {
     const batchSize = resolveLimit(options.audioFeatureBatchSize, "AUDIO_FEATURE_BATCH_SIZE");
@@ -53,6 +57,7 @@ export const runAudioFeatureEngine = async (options: SyncEngineOptions = {}) => 
     engineBatchSize.observe({ engine: ENGINE }, tracksToProcess.length);
 
     for (const track of tracksToProcess) {
+      attempted += 1;
       let outcome: "success" | "not_found" | "rate_limited" | "error" = "success";
       const endTimer = trackDurationSeconds.startTimer({ engine: ENGINE });
       try {
@@ -148,9 +153,11 @@ export const runAudioFeatureEngine = async (options: SyncEngineOptions = {}) => 
       }
     }
 
-    console.log("[AudioFeatureEngine] Audio features sync batch completed!");
+    console.log(`[AudioFeatureEngine] Audio features sync batch completed! (${attempted} attempted)`);
 
   } catch (error) {
     console.error("[AudioFeatureEngine] Sync failed", error);
   }
+
+  return attempted;
 };

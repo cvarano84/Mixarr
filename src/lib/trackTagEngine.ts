@@ -17,8 +17,12 @@ const ENGINE = "tags";
 const RETRY_AFTER_DAYS = 14;
 const RETRY_MS = RETRY_AFTER_DAYS * 24 * 60 * 60 * 1000;
 
-export const runTrackTagEngine = async (options: SyncEngineOptions = {}) => {
+// One batch of track-tag enrichment. Returns the number of tracks we
+// attempted, which the scheduler uses to know when the queue is drained.
+export const runTrackTagEngine = async (options: SyncEngineOptions = {}): Promise<number> => {
   console.log("[TrackTagEngine] Starting background track tag sync...");
+
+  let attempted = 0;
 
   try {
     const batchSize = resolveLimit(options.tagBatchSize, "TRACK_TAG_BATCH_SIZE");
@@ -46,6 +50,7 @@ export const runTrackTagEngine = async (options: SyncEngineOptions = {}) => {
     engineBatchSize.observe({ engine: ENGINE }, tracksToProcess.length);
 
     for (const track of tracksToProcess) {
+      attempted += 1;
       let outcome: "success" | "not_found" | "rate_limited" | "error" = "success";
       const endTimer = trackDurationSeconds.startTimer({ engine: ENGINE });
       try {
@@ -100,9 +105,11 @@ export const runTrackTagEngine = async (options: SyncEngineOptions = {}) => {
       }
     }
 
-    console.log("[TrackTagEngine] Track tag sync batch completed!");
+    console.log(`[TrackTagEngine] Track tag sync batch completed! (${attempted} attempted)`);
 
   } catch (error) {
     console.error("[TrackTagEngine] Sync failed", error);
   }
+
+  return attempted;
 };
