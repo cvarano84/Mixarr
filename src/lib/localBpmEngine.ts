@@ -4,6 +4,7 @@ import os from "os";
 import path from "path";
 import prisma from "./prisma";
 import { getDeezerBpm } from "./providers/deezer";
+import { isRateLimitError } from "./providers/rateLimit";
 import { resolveDelayMs, resolveLimit, type SyncEngineOptions } from "./syncSettings";
 import {
   engineBatchSize,
@@ -418,9 +419,21 @@ export const runLocalBpmEngine = async (options: SyncEngineOptions = {}) => {
           outcome = "not_found";
         }
       } catch (error: any) {
-        console.error(`[LocalBpmEngine] Failed ${track.artist.title} - ${track.title}:`, error.message);
-        await saveTempo(track.id, null, "local_not_found", 0).catch(() => undefined);
-        outcome = "error";
+        if (isRateLimitError(error)) {
+          // Deezer was rate-limited. Don't fall through to local Aubio
+          // analysis and don't write a not_found marker — both would
+          // lock this track into a worse data source for the next 14
+          // days when Deezer might have the canonical BPM available
+          // the moment the rate-limit window rolls off.
+          outcome = "rate_limited";
+          console.warn(
+            `[LocalBpmEngine] Rate-limited while looking up "${track.artist.title} - ${track.title}" (${error.message}); leaving it queued.`,
+          );
+        } else {
+          console.error(`[LocalBpmEngine] Failed ${track.artist.title} - ${track.title}:`, error.message);
+          await saveTempo(track.id, null, "local_not_found", 0).catch(() => undefined);
+          outcome = "error";
+        }
       } finally {
         endTimer();
         trackAttemptsTotal.inc({ engine: ENGINE, result: outcome });

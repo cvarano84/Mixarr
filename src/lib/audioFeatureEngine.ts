@@ -2,6 +2,7 @@ import prisma from "./prisma";
 import { getSpotifyAudioFeatures } from "./providers/spotify";
 import { getAudioDbFeatures } from "./providers/audiodb";
 import { getDeezerBpm } from "./providers/deezer";
+import { isRateLimitError } from "./providers/rateLimit";
 import { resolveDelayMs, resolveLimit, type SyncEngineOptions } from "./syncSettings";
 import {
   engineBatchSize,
@@ -136,9 +137,17 @@ export const runAudioFeatureEngine = async (options: SyncEngineOptions = {}): Pr
           outcome = "not_found";
         }
       } catch (e: any) {
-        if (e.message === "NO_TOKEN" || e.message?.startsWith("RATE_LIMIT")) {
-          // Do not log the full stack trace for known auth/rate limits, just skip
+        if (isRateLimitError(e) || e.message === "NO_TOKEN") {
+          // AudioDB or Deezer was rate-limited mid-track. Skip without
+          // writing a marker row so the next batch can re-try once the
+          // window has rolled off. This is what stops a hot AudioDB
+          // rate-limit from silently downgrading every subsequent track
+          // to a BPM-only row (and locking the audio features in for
+          // 14 days even though the rate-limit was transient).
           outcome = "rate_limited";
+          console.warn(
+            `[AudioFeatureEngine] Rate-limited while looking up "${track.artist.title} - ${track.title}" (${e.message}); leaving it queued.`,
+          );
         } else {
           console.error(`[AudioFeatureEngine] Unexpected error on track ${track.title}:`, e.message);
           outcome = "error";

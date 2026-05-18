@@ -6,6 +6,7 @@ import {
 import { getDeezerTrackTags } from "./providers/deezer";
 import { getLastFmTrackTags } from "./providers/lastfm";
 import { getMusicBrainzTrackTags } from "./providers/musicbrainz";
+import { isRateLimitError } from "./providers/rateLimit";
 import {
   getSpotifyTrackTags,
   isSpotifyTagLookupEnabled,
@@ -118,7 +119,6 @@ export const resolveTrackGenreTags = async (
   track: string,
 ): Promise<TrackTagResolution> => {
   const attemptedProviders: TrackTagProviderName[] = [];
-  let rateLimited = false;
 
   for (const provider of resolveProviderOrder()) {
     if (!providerEnabled(provider)) continue;
@@ -137,8 +137,29 @@ export const resolveTrackGenreTags = async (
         };
       }
     } catch (error: any) {
+      // Rate-limit short-circuits the chain entirely. We deliberately do
+      // NOT fall through to lower-preference providers because doing so
+      // would let a hot rate limit silently downgrade tag quality and
+      // mark the track as synced with the worse data — locking it out
+      // of the preferred provider for the next RETRY_AFTER_DAYS window.
+      // The track stays unsynced; the next batch re-queues it.
+      if (isRateLimitError(error)) {
+        const message = error?.message || String(error);
+        console.warn(
+          `[TrackTagProviders] ${provider} rate-limited for ${artist} - ${track} (${message}); ` +
+            `halting provider chain so the preferred order is preserved on the next batch.`,
+        );
+        return {
+          tags: [],
+          provider: null,
+          attemptedProviders,
+          rateLimited: true,
+        };
+      }
+
+      // Anything else (not-found, network error, parse failure, ...) is
+      // genuinely a "this provider can't help, try the next one" signal.
       const message = error?.message || String(error);
-      if (message.startsWith("RATE_LIMIT")) rateLimited = true;
       console.warn(`[TrackTagProviders] ${provider} returned no tags for ${artist} - ${track}: ${message}`);
     }
   }
@@ -147,6 +168,6 @@ export const resolveTrackGenreTags = async (
     tags: [],
     provider: null,
     attemptedProviders,
-    rateLimited,
+    rateLimited: false,
   };
 };
