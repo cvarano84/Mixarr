@@ -3,6 +3,7 @@ import {
   providerRequestDurationSeconds,
   providerRequestsTotal,
 } from "../metrics";
+import { RateLimitError, parseRetryAfterMs } from "./rateLimit";
 
 // Hard cap on outbound HTTP calls. Without this, Node will sit on a hung TCP
 // connection until the kernel gives up (~15 min on default tcp_retries2),
@@ -74,6 +75,13 @@ export const getAudioDbFeatures = async (artist: string, track: string) => {
     result = classifyError(error);
     const reason = error?.code === "ECONNABORTED" ? "timeout" : (error?.code || error?.message || "error");
     console.error(`[AudioDB] Fetch failed for ${artist} - ${track} (${reason})`);
+    // Surface rate-limits so the audio-feature engine re-queues the track
+    // instead of writing a marker row that locks it out for 14 days. The
+    // free AudioDB tier rate-limits aggressively, so this matters.
+    if (result === "rate_limited") {
+      const retryAfterMs = parseRetryAfterMs(error?.response?.headers?.["retry-after"]);
+      throw new RateLimitError(PROVIDER, retryAfterMs);
+    }
     return null;
   } finally {
     endTimer();

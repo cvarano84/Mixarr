@@ -4,6 +4,7 @@ import {
   providerRequestDurationSeconds,
   providerRequestsTotal,
 } from "../metrics";
+import { RateLimitError, parseRetryAfterMs } from "./rateLimit";
 
 // See note in audiodb.ts.
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -23,9 +24,16 @@ const truthyEnv = (value: string | undefined) => {
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
 };
 
+// True iff Spotify credentials are set in the environment. Use this to
+// distinguish "Spotify isn't configured, skip it" (caller returns null and
+// lets the engine fall through to other providers) from "creds are set
+// but the token endpoint refused us" (which we treat as a rate-limit so
+// the engine re-queues instead of writing a not_found marker).
+const isSpotifyConfigured = () =>
+  Boolean(process.env.SPOTIFY_CLIENT_ID && process.env.SPOTIFY_CLIENT_SECRET);
+
 export const isSpotifyTagLookupEnabled = () => {
-  return truthyEnv(process.env.SPOTIFY_TAGS_ENABLED) &&
-    Boolean(process.env.SPOTIFY_CLIENT_ID && process.env.SPOTIFY_CLIENT_SECRET);
+  return truthyEnv(process.env.SPOTIFY_TAGS_ENABLED) && isSpotifyConfigured();
 };
 
 // Key used in the SystemState table for the Spotify rate-limit backoff
@@ -120,9 +128,9 @@ const getSpotifyToken = async (): Promise<string | null> => {
     console.error("Failed to authenticate with Spotify API:", status || error.message);
     
     if (status === 429) {
-      const retryAfter = Number(error.response?.headers['retry-after']) || 60;
-      setTokenFailureTime(Date.now() + (retryAfter * 1000));
-      throw new Error(`RATE_LIMIT:${retryAfter}`);
+      const retryAfterMs = parseRetryAfterMs(error.response?.headers['retry-after']) ?? 60_000;
+      setTokenFailureTime(Date.now() + retryAfterMs);
+      throw new RateLimitError(PROVIDER, retryAfterMs);
     } else {
       // Backoff for 60 seconds on any other auth error (e.g., 401 invalid client)
       setTokenFailureTime(Date.now() + 60000);
@@ -132,17 +140,26 @@ const getSpotifyToken = async (): Promise<string | null> => {
 };
 
 export const getSpotifyPopularity = async (artist: string, track: string): Promise<number | null> => {
+  // Not configured: behave like a disabled provider so the popularity
+  // engine falls through to whatever IS configured. We intentionally
+  // don't even start the metrics timer in this case — a "Spotify isn't
+  // set up" run shouldn't look like a real attempt in Grafana.
+  if (!isSpotifyConfigured()) return null;
+
   const endTimer = providerRequestDurationSeconds.startTimer({ provider: PROVIDER });
   let result: Outcome = "success";
 
   try {
     const token = await getSpotifyToken();
     if (!token) {
-      // No token = either creds missing, or we're in a persisted backoff
-      // window. Either way it's effectively a rate-limit skip from the
-      // engine's POV.
+      // Creds are present but we couldn't get a token, which only
+      // happens when we're inside the persisted rate-limit backoff
+      // window from a previous 429 (or a recent auth failure with its
+      // own 60s cool-off). Surface as a rate-limit so the engine
+      // re-queues the track instead of writing a not_found marker that
+      // would lock it out of Spotify for the next 14 days.
       result = "rate_limited";
-      return null;
+      throw new RateLimitError(PROVIDER);
     }
 
     const query = `artist:${artist} track:${track}`;
@@ -166,6 +183,10 @@ export const getSpotifyPopularity = async (artist: string, track: string): Promi
     result = "not_found";
     return null;
   } catch (error: any) {
+    if (error instanceof RateLimitError) {
+      result = "rate_limited";
+      throw error;
+    }
     if (error.message === "NO_TOKEN" || (error.message && error.message.startsWith("RATE_LIMIT"))) {
       result = "rate_limited";
       throw error;
@@ -174,10 +195,10 @@ export const getSpotifyPopularity = async (artist: string, track: string): Promi
     result = classifyError(error);
     const status = error.response?.status;
     if (status === 429) {
-      const retryAfter = Number(error.response?.headers['retry-after']) || 5;
-      setTokenFailureTime(Date.now() + (retryAfter * 1000));
-      console.warn(`[Spotify] Popularity rate limited. Backing off for ${retryAfter}s...`);
-      throw new Error(`RATE_LIMIT:${retryAfter}`); 
+      const retryAfterMs = parseRetryAfterMs(error.response?.headers['retry-after']) ?? 5000;
+      setTokenFailureTime(Date.now() + retryAfterMs);
+      console.warn(`[Spotify] Popularity rate limited. Backing off for ${Math.round(retryAfterMs / 1000)}s...`);
+      throw new RateLimitError(PROVIDER, retryAfterMs);
     }
 
     console.error(`Spotify fetch failed for ${artist} - ${track}:`, error.message, status || '');
@@ -197,8 +218,11 @@ export const getSpotifyTrackTags = async (artist: string, track: string): Promis
   try {
     const token = await getSpotifyToken();
     if (!token) {
+      // Creds are set (isSpotifyTagLookupEnabled gated us in) but the
+      // token endpoint is in backoff. Re-queue so the next batch can
+      // try again — don't silently fall through to a worse provider.
       result = "rate_limited";
-      throw new Error("RATE_LIMIT:spotify_unavailable");
+      throw new RateLimitError(PROVIDER);
     }
 
     const query = `artist:${artist} track:${track}`;
@@ -242,6 +266,10 @@ export const getSpotifyTrackTags = async (artist: string, track: string): Promis
     if (tags.length === 0) result = "not_found";
     return tags;
   } catch (error: any) {
+    if (error instanceof RateLimitError) {
+      result = "rate_limited";
+      throw error;
+    }
     if (error.message === "NO_TOKEN" || (error.message && error.message.startsWith("RATE_LIMIT"))) {
       result = "rate_limited";
       throw error;
@@ -250,10 +278,10 @@ export const getSpotifyTrackTags = async (artist: string, track: string): Promis
     result = classifyError(error);
     const status = error.response?.status;
     if (status === 429) {
-      const retryAfter = Number(error.response?.headers['retry-after']) || 5;
-      setTokenFailureTime(Date.now() + (retryAfter * 1000));
-      console.warn(`[Spotify] Tag lookup rate limited. Backing off for ${retryAfter}s...`);
-      throw new Error(`RATE_LIMIT:${retryAfter}`);
+      const retryAfterMs = parseRetryAfterMs(error.response?.headers['retry-after']) ?? 5000;
+      setTokenFailureTime(Date.now() + retryAfterMs);
+      console.warn(`[Spotify] Tag lookup rate limited. Backing off for ${Math.round(retryAfterMs / 1000)}s...`);
+      throw new RateLimitError(PROVIDER, retryAfterMs);
     }
 
     if (status === 403) {
@@ -270,14 +298,19 @@ export const getSpotifyTrackTags = async (artist: string, track: string): Promis
 };
 
 export const getSpotifyAudioFeatures = async (artist: string, track: string): Promise<any> => {
+  // Not configured: act as if this provider doesn't exist. The audio
+  // feature engine ignores `null` and tries Deezer BPM independently.
+  if (!isSpotifyConfigured()) return null;
+
   const endTimer = providerRequestDurationSeconds.startTimer({ provider: PROVIDER });
   let result: Outcome = "success";
 
   try {
     const token = await getSpotifyToken();
     if (!token) {
+      // Creds are present but we're in backoff — re-queue.
       result = "rate_limited";
-      throw new Error("NO_TOKEN");
+      throw new RateLimitError(PROVIDER);
     }
 
     // Simplify query to avoid strict matching failures with special characters
@@ -313,6 +346,10 @@ export const getSpotifyAudioFeatures = async (artist: string, track: string): Pr
       tempo: featureRes.data.tempo
     };
   } catch (error: any) {
+    if (error instanceof RateLimitError) {
+      result = "rate_limited";
+      throw error;
+    }
     if (error.message === "NO_TOKEN" || (error.message && error.message.startsWith("RATE_LIMIT"))) {
       result = "rate_limited";
       throw error; // Let the engine catch auth/rate limit errors so it doesn't save empty rows
@@ -321,10 +358,10 @@ export const getSpotifyAudioFeatures = async (artist: string, track: string): Pr
     result = classifyError(error);
     const status = error.response?.status;
     if (status === 429) {
-      const retryAfter = Number(error.response?.headers['retry-after']) || 5;
-      setTokenFailureTime(Date.now() + (retryAfter * 1000));
-      console.warn(`[Spotify] Audio features rate limited. Backing off for ${retryAfter}s...`);
-      throw new Error(`RATE_LIMIT:${retryAfter}`); 
+      const retryAfterMs = parseRetryAfterMs(error.response?.headers['retry-after']) ?? 5000;
+      setTokenFailureTime(Date.now() + retryAfterMs);
+      console.warn(`[Spotify] Audio features rate limited. Backing off for ${Math.round(retryAfterMs / 1000)}s...`);
+      throw new RateLimitError(PROVIDER, retryAfterMs);
     }
     
     if (status === 403) {

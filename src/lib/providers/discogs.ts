@@ -3,6 +3,12 @@ import {
   providerRequestDurationSeconds,
   providerRequestsTotal,
 } from "../metrics";
+import {
+  RateLimitError,
+  createCooldown,
+  createThrottle,
+  parseRetryAfterMs,
+} from "./rateLimit";
 
 const PROVIDER = "discogs";
 
@@ -13,6 +19,22 @@ function classifyError(error: any): "timeout" | "rate_limited" | "error" {
   if (error?.response?.status === 429) return "rate_limited";
   return "error";
 }
+
+// Discogs publishes a 60 req/min authenticated cap (25/min anonymous). The
+// default 1100ms spacing is the same value the design doc called for: ~55
+// req/min, just under the cap with headroom for clock skew and parallel
+// requests within a single track lookup. Configurable via env for ops
+// flexibility.
+function getMinIntervalMs() {
+  const configured = Number(process.env.DISCOGS_RATE_LIMIT_MS || 1100);
+  return Number.isFinite(configured) && configured >= 0 ? configured : 1100;
+}
+
+// One throttle and one cooldown per process, shared across every call into
+// this module. Module-level so concurrent enrichment batches don't blow the
+// per-token rate limit by each maintaining their own counter.
+const discogsThrottle = createThrottle({ minIntervalMs: getMinIntervalMs() });
+const discogsCooldown = createCooldown({ provider: PROVIDER, defaultCooldownMs: 60_000 });
 
 function envEnabled(name: string, defaultValue: boolean) {
   const value = process.env[name]?.toLowerCase();
@@ -106,6 +128,11 @@ export const getDiscogsTrackTags = async (artist: string, track: string): Promis
   let result: Outcome = "success";
 
   try {
+    // Short-circuit if we're still inside a previously-triggered cooldown
+    // window. Avoids burning the next minute's budget on doomed requests
+    // and lets the router halt the per-track provider chain immediately.
+    discogsCooldown.check();
+
     const searches = [
       { q: track, artist, type: "release" },
       { q: `${artist} ${track}`, type: "release" },
@@ -113,6 +140,7 @@ export const getDiscogsTrackTags = async (artist: string, track: string): Promis
     ];
 
     for (const params of searches) {
+      await discogsThrottle();
       const response = await axios.get("https://api.discogs.com/database/search", {
         params: {
           ...params,
@@ -132,11 +160,20 @@ export const getDiscogsTrackTags = async (artist: string, track: string): Promis
     result = "not_found";
     return [];
   } catch (error: any) {
+    // Cooldown-throw path: already a RateLimitError, no network round-trip
+    // happened. Re-throw without re-logging or re-triggering the cooldown.
+    if (error instanceof RateLimitError) {
+      result = "rate_limited";
+      throw error;
+    }
+
     result = classifyError(error);
     const reason = error?.code === "ECONNABORTED" ? "timeout" : (error?.code || error?.message || "error");
     console.error(`[Discogs] Tags fetch failed for ${artist} - ${track} (${reason})`);
     if (result === "rate_limited") {
-      throw new Error("RATE_LIMIT:discogs");
+      const retryAfterMs = parseRetryAfterMs(error?.response?.headers?.["retry-after"]);
+      discogsCooldown.trigger(retryAfterMs);
+      throw new RateLimitError(PROVIDER, retryAfterMs);
     }
     return [];
   } finally {

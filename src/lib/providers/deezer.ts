@@ -3,6 +3,7 @@ import {
   providerRequestDurationSeconds,
   providerRequestsTotal,
 } from "../metrics";
+import { RateLimitError, parseRetryAfterMs } from "./rateLimit";
 
 // See note in audiodb.ts. Without an explicit timeout, a single dropped TCP
 // connection can stall a worker for ~15 minutes (kernel tcp_retries2 default).
@@ -18,6 +19,13 @@ function classifyError(error: any): "timeout" | "rate_limited" | "error" {
   if (error?.code === "ECONNABORTED") return "timeout";
   if (error?.response?.status === 429) return "rate_limited";
   return "error";
+}
+
+// Build the RateLimitError to re-throw on 429. Reads the Retry-After header
+// if Deezer sends one so the engine knows roughly how long to wait.
+function buildRateLimitError(error: any): RateLimitError {
+  const retryAfterMs = parseRetryAfterMs(error?.response?.headers?.["retry-after"]);
+  return new RateLimitError(PROVIDER, retryAfterMs);
 }
 
 
@@ -47,6 +55,11 @@ export const getDeezerPopularity = async (artist: string, track: string): Promis
     result = classifyError(error);
     const reason = error?.code === "ECONNABORTED" ? "timeout" : (error?.code || error?.message || "error");
     console.error(`[Deezer] Popularity fetch failed for ${artist} - ${track} (${reason})`);
+    // Surface rate-limits so the engine can re-queue the track instead of
+    // saving a not_found marker that locks it out for the next 14 days.
+    if (result === "rate_limited") {
+      throw buildRateLimitError(error);
+    }
     return null;
   } finally {
     endTimer();
@@ -82,6 +95,12 @@ export const getDeezerBpm = async (artist: string, track: string): Promise<numbe
     result = classifyError(error);
     const reason = error?.code === "ECONNABORTED" ? "timeout" : (error?.code || error?.message || "error");
     console.error(`[Deezer] BPM fetch failed for ${artist} - ${track} (${reason})`);
+    // Surface rate-limits so the BPM/audio-feature engines can re-queue
+    // the track instead of falling back to local analysis (or writing a
+    // not_found marker) and locking the track out of Deezer for 14 days.
+    if (result === "rate_limited") {
+      throw buildRateLimitError(error);
+    }
     return null;
   } finally {
     endTimer();
@@ -153,7 +172,7 @@ export const getDeezerTrackTags = async (artist: string, track: string): Promise
     const reason = error?.code === "ECONNABORTED" ? "timeout" : (error?.code || error?.message || "error");
     console.error(`[Deezer] Tags fetch failed for ${artist} - ${track} (${reason})`);
     if (result === "rate_limited") {
-      throw new Error("RATE_LIMIT:deezer");
+      throw buildRateLimitError(error);
     }
     return [];
   } finally {

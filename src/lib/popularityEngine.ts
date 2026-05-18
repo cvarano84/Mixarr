@@ -1,6 +1,7 @@
 import prisma from "./prisma";
 import { getDeezerPopularity } from "./providers/deezer";
 import { getLastFmPopularity } from "./providers/lastfm";
+import { isRateLimitError } from "./providers/rateLimit";
 import { getSpotifyPopularity } from "./providers/spotify";
 import { resolveDelayMs, resolveLimit, type SyncEngineOptions } from "./syncSettings";
 import {
@@ -137,10 +138,18 @@ export const runPopularityEngine = async (options: SyncEngineOptions = {}): Prom
           outcome = "not_found";
         }
       } catch (e: any) {
-        if (e.message === "NO_TOKEN" || e.message?.startsWith("RATE_LIMIT")) {
-          // We got rate limited by Spotify (or token failed). Do NOT save an empty row. 
-          // Just skip to the next track so this one can be retried on the next run.
+        if (isRateLimitError(e) || e.message === "NO_TOKEN") {
+          // A provider was rate-limited (any provider — Deezer, Last.fm,
+          // Spotify). Do NOT save a not_found marker; leave the track
+          // queued so the next batch re-tries against the preferred
+          // provider once its rate-limit window has rolled off. This is
+          // what stops a hot Deezer rate-limit from silently downgrading
+          // the entire batch to Last.fm or Spotify and locking those
+          // tracks into the worse data for 14 days.
           outcome = "rate_limited";
+          console.warn(
+            `[PopularityEngine] Rate-limited while looking up "${track.artist.title} - ${track.title}" (${e.message}); leaving it queued.`,
+          );
         } else {
           console.error(`[PopularityEngine] Unexpected error on track ${track.title}:`, e.message);
           outcome = "error";
