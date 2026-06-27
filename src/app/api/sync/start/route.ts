@@ -98,8 +98,16 @@ async function runInitialEnrichment(syncSettings: Awaited<ReturnType<typeof getU
   await popularity.runPopularityEngine(syncSettings);
   await tags.runTrackTagEngine(syncSettings);
   await audio.runAudioFeatureEngine(syncSettings);
-  await (await import('@/lib/localAudioFeatureEngine')).runLocalAudioFeatureEngine(syncSettings);
+  if (localAudioFeaturesAutoBackfillEnabled()) {
+    await (await import('@/lib/localAudioFeatureEngine')).runLocalAudioFeatureEngine(syncSettings);
+  } else {
+    console.log("[InitialSync] Skipping local Essentia audio feature backfill; set LOCAL_AUDIO_FEATURES_AUTO_BACKFILL=1 to include it in automatic initial enrichment.");
+  }
   await bpm.runLocalBpmEngine(syncSettings);
 
   console.log("[InitialSync] Recommended enrichment sequence completed.");
+}
+
+function localAudioFeaturesAutoBackfillEnabled() {
+  return ["1", "true", "yes", "on"].includes(String(process.env.LOCAL_AUDIO_FEATURES_AUTO_BACKFILL || "").trim().toLowerCase());
 }

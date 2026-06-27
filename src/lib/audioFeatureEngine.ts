@@ -75,7 +75,7 @@ export const runAudioFeatureEngine = async (options: SyncEngineOptions = {}): Pr
       ],
     };
     const candidateCount = await prisma.track.count({ where });
-    console.log(`[AudioFeatureEngine] Found ${candidateCount} tracks needing audio features.`);
+    console.log(`[AudioFeatureEngine] Found ${candidateCount} tracks missing final audio features and eligible for remote/API lookup.`);
     engineBatchSize.observe({ engine: ENGINE }, Math.min(candidateCount, batchSize || candidateCount));
 
     summary = await safeTrackBatchIterator<any>({

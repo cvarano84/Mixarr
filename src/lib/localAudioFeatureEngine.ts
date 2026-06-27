@@ -14,8 +14,6 @@ import {
   type AudioInputSource,
 } from "./localBpmEngine";
 import {
-  audioFeatureAnalyzerFailedTrackWhere,
-  audioFeatureExtractionFailedTrackWhere,
   completeAudioFeatureWhere,
   missingAudioFeatureTrackWhere,
   type AudioFeatureStatus,
@@ -32,12 +30,19 @@ import {
 } from "./metrics";
 import { safeTrackBatchIterator, type EnrichmentRunSummary } from "./safeTrackBatch";
 import { resolveDbJobConcurrency, runWithConcurrency } from "./concurrency";
+import { acquireJobLock } from "./jobLock";
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const ENGINE = "audio_feature";
+const LOCAL_AUDIO_FEATURE_JOB_KEY = "audio_feature:local";
 const essentiaPythonPath = process.env.LOCAL_BPM_ESSENTIA_PYTHON || "/opt/essentia/bin/python";
 const featureTempRoot = process.env.LOCAL_AUDIO_FEATURE_TEMP_DIR || path.join(os.tmpdir(), "mixarr-audio-features");
+
+const localAudioFeatureGlobals = globalThis as typeof globalThis & {
+  mixarrLocalAudioFeatureShutdownRequested?: boolean;
+  mixarrLocalAudioFeatureSignalHandlersInstalled?: boolean;
+};
 
 export type LocalAudioFeatureAnalysisScope = "windows" | "whole_track";
 
@@ -87,6 +92,25 @@ function boolSetting(userValue: boolean | null | undefined, envName: string, def
   const envValue = process.env[envName];
   if (envValue === undefined) return defaultValue;
   return ["1", "true", "yes", "on"].includes(envValue.trim().toLowerCase());
+}
+
+function debugLog(message: string) {
+  if (boolSetting(undefined, "LOCAL_AUDIO_FEATURE_DEBUG", false)) console.log(message);
+}
+
+function installShutdownHandlers() {
+  if (localAudioFeatureGlobals.mixarrLocalAudioFeatureSignalHandlersInstalled) return;
+  localAudioFeatureGlobals.mixarrLocalAudioFeatureSignalHandlersInstalled = true;
+
+  const requestShutdown = () => {
+    localAudioFeatureGlobals.mixarrLocalAudioFeatureShutdownRequested = true;
+  };
+  process.once("SIGTERM", requestShutdown);
+  process.once("SIGINT", requestShutdown);
+}
+
+function shutdownRequested() {
+  return localAudioFeatureGlobals.mixarrLocalAudioFeatureShutdownRequested === true;
 }
 
 export function normalizeAudioFeatureAnalysisScope(value: unknown): LocalAudioFeatureAnalysisScope {
@@ -459,7 +483,7 @@ async function analyzeTrackWholeTrack(track: any, tempDir: string): Promise<Loca
 
   for (let index = 0; index < sources.length; index++) {
     const source = sources[index];
-    console.log(`[LocalAudioFeatureEngine] Analyzing ${trackLabel(track)} using ${source.type} whole_track.`);
+    debugLog(`[LocalAudioFeatureEngine] Analyzing ${trackLabel(track)} using ${source.type} whole_track.`);
 
     try {
       const result = await analyzeWholeTrackSource(track, source, tempDir, index);
@@ -521,11 +545,11 @@ async function analyzeTrackWindows(track: any, tempDir: string): Promise<LocalAu
     }
 
     try {
-      console.log(`[LocalAudioFeatureEngine] Analyzing ${trackLabel(track)} using ${sourceType} windows.`);
+      debugLog(`[LocalAudioFeatureEngine] Analyzing ${trackLabel(track)} using ${sourceType} windows.`);
       const analysis = await analyzeSampleWithEssentia(wavPath);
       if (analysis) {
         results.push(analysis);
-        console.log(
+        debugLog(
           `[LocalAudioFeatureEngine] Window ${sampleWindow.label} -> energy=${analysis.energy.toFixed(2)} mood=${analysis.valence.toFixed(2)} danceability=${analysis.danceability.toFixed(2)} confidence=${analysis.confidence.toFixed(2)}`,
         );
       }
@@ -626,7 +650,7 @@ async function saveLocalFeatures(track: any, result: LocalAudioFeatureResult, op
   };
 
   setField("energy", "energySource", result.energy, "local_essentia");
-  setField("danceability", "danceabilitySource", result.danceability, "local_heuristic");
+  setField("danceability", "danceabilitySource", result.danceability, "local_essentia");
   if (options.allowEstimatedMoodAcousticness) {
     setField("valence", "valenceSource", result.valence, "local_heuristic");
     setField("acousticness", "acousticnessSource", result.acousticness, "local_heuristic");
@@ -660,10 +684,10 @@ async function saveLocalFeatures(track: any, result: LocalAudioFeatureResult, op
     } as any,
   });
 
-  console.log(
+  debugLog(
     `[LocalAudioFeatureEngine] ${trackLabel(track)} -> energy=${result.energy.toFixed(2)} mood=${result.valence.toFixed(2)} danceability=${result.danceability.toFixed(2)} acousticness=${result.acousticness.toFixed(2)} bpm=${result.tempo?.toFixed(1) || "n/a"} source=local_essentia scope=${result.analysisScope} confidence=${result.confidence.toFixed(2)}`,
   );
-  console.log(`[LocalAudioFeatureEngine] Persisted local audio features for track ${track.id}.`);
+  debugLog(`[LocalAudioFeatureEngine] Persisted local audio features for track ${track.id}.`);
 }
 
 async function saveFailure(trackId: string, status: AudioFeatureStatus, scope: LocalAudioFeatureAnalysisScope, reason?: string) {
@@ -692,15 +716,46 @@ async function saveFailure(trackId: string, status: AudioFeatureStatus, scope: L
   });
 }
 
-function localAudioFeatureWhere(reprocessLocal: boolean) {
+function localAttemptedAudioFeatureWhere() {
+  return {
+    audioFeatureAnalyzedAt: { not: null },
+    OR: [
+      { audioFeatureSource: { in: ["local_essentia", "local_heuristic", "mixed"] } },
+      { energySource: "local_essentia" },
+      { valenceSource: { in: ["local_essentia", "local_heuristic"] } },
+      { danceabilitySource: { in: ["local_essentia", "local_heuristic"] } },
+      { acousticnessSource: { in: ["local_essentia", "local_heuristic"] } },
+    ],
+  };
+}
+
+function localAudioFeatureReprocessWhere() {
+  return {
+    audioFeature: {
+      is: {
+        OR: [
+          { audioFeatureSource: { in: ["local_essentia", "local_heuristic", "mixed"] } },
+          { energySource: "local_essentia" },
+          { valenceSource: { in: ["local_essentia", "local_heuristic"] } },
+          { danceabilitySource: { in: ["local_essentia", "local_heuristic"] } },
+          { acousticnessSource: { in: ["local_essentia", "local_heuristic"] } },
+        ],
+      },
+    },
+  };
+}
+
+export function localAudioFeatureWhere(reprocessLocal: boolean) {
   if (reprocessLocal) {
     return {
-      syncStatus: "active",
-      OR: [
-        missingAudioFeatureTrackWhere(),
-        { audioFeature: { is: { audioFeatureSource: { in: ["local_essentia", "local_heuristic", "mixed"] } } } },
-        audioFeatureExtractionFailedTrackWhere(),
-        audioFeatureAnalyzerFailedTrackWhere(),
+      AND: [
+        { syncStatus: "active" },
+        {
+          OR: [
+            missingAudioFeatureTrackWhere(),
+            localAudioFeatureReprocessWhere(),
+          ],
+        },
       ],
     };
   }
@@ -709,11 +764,79 @@ function localAudioFeatureWhere(reprocessLocal: boolean) {
     AND: [
       { syncStatus: "active" },
       missingAudioFeatureTrackWhere(),
-      { NOT: audioFeatureExtractionFailedTrackWhere() },
-      { NOT: audioFeatureAnalyzerFailedTrackWhere() },
+      { NOT: { audioFeature: { is: localAttemptedAudioFeatureWhere() } } },
     ],
   };
 }
+
+type LocalBackfillTrack = {
+  syncStatus?: string | null;
+  audioFeature?: {
+    energy?: number | null;
+    valence?: number | null;
+    danceability?: number | null;
+    acousticness?: number | null;
+    tempo?: number | null;
+    source?: string | null;
+    audioFeatureSource?: string | null;
+    audioFeatureStatus?: string | null;
+    audioFeatureConfidence?: number | null;
+    audioFeatureAnalyzedAt?: Date | string | null;
+    energySource?: string | null;
+    valenceSource?: string | null;
+    danceabilitySource?: string | null;
+    acousticnessSource?: string | null;
+  } | null;
+};
+
+function hasLocalAudioFeatureAttempt(track: LocalBackfillTrack) {
+  const feature = track.audioFeature;
+  if (!feature?.audioFeatureAnalyzedAt) return false;
+  if (["local_essentia", "local_heuristic", "mixed"].includes(String(feature.audioFeatureSource || ""))) return true;
+  return [
+    feature.energySource,
+    feature.valenceSource,
+    feature.danceabilitySource,
+    feature.acousticnessSource,
+  ].some((source) => source === "local_essentia" || source === "local_heuristic");
+}
+
+export function needsLocalAudioFeatureBackfill(track: LocalBackfillTrack, options: { reprocessLocal?: boolean } = {}) {
+  if (track.syncStatus && track.syncStatus !== "active") return false;
+  if (!track.audioFeature) return true;
+  const hasLocalAttempt = hasLocalAudioFeatureAttempt(track);
+  if (!options.reprocessLocal && hasLocalAttempt) return false;
+  const feature = track.audioFeature;
+  const requiredFinalFields = [feature.energy, feature.valence, feature.danceability, feature.tempo];
+  const source = String(feature.source || "");
+  const status = String(feature.audioFeatureStatus || "");
+  const isPlaceholder = ["not_found", "estimated", "Deezer BPM only"].includes(source)
+    || source.toLowerCase().includes("unknown mood")
+    || status === "no_data";
+  const hasFinalFeatures = requiredFinalFields.every((value) => value !== null && value !== undefined)
+    && !isPlaceholder;
+  return options.reprocessLocal ? hasLocalAttempt || !hasFinalFeatures : !hasFinalFeatures;
+}
+
+const localAudioFeatureTrackSelect = {
+  id: true,
+  title: true,
+  plexId: true,
+  ratingKey: true,
+  duration: true,
+  mediaPath: true,
+  syncStatus: true,
+  artist: { select: { title: true } },
+  album: { select: { title: true } },
+  library: {
+    select: {
+      id: true,
+      name: true,
+      server: { select: { uri: true, accessToken: true } },
+    },
+  },
+  audioFeature: true,
+} as const;
 
 export const runLocalAudioFeatureEngine = async (options: SyncEngineOptions = {}): Promise<EnrichmentRunSummary> => {
   console.log("[LocalAudioFeatureEngine] Starting local audio feature backfill.");
@@ -722,6 +845,20 @@ export const runLocalAudioFeatureEngine = async (options: SyncEngineOptions = {}
   const enabled = boolSetting(options.enableLocalAudioFeatureFallback, "LOCAL_AUDIO_FEATURE_FALLBACK_ENABLED", true);
   if (!enabled) {
     console.log("[LocalAudioFeatureEngine] Local audio feature fallback is disabled.");
+    return summary;
+  }
+
+  installShutdownHandlers();
+  localAudioFeatureGlobals.mixarrLocalAudioFeatureShutdownRequested = false;
+  const lock = acquireJobLock({
+    name: "local Essentia audio feature backfill",
+    keys: [LOCAL_AUDIO_FEATURE_JOB_KEY],
+    source: "local-audio-feature-engine",
+  });
+  if (!lock.acquired) {
+    console.warn(
+      `[LocalAudioFeatureEngine] Duplicate local audio feature backfill ignored; ${lock.activeJob.name} started at ${lock.activeJob.startedAt}.`,
+    );
     return summary;
   }
 
@@ -736,49 +873,72 @@ export const runLocalAudioFeatureEngine = async (options: SyncEngineOptions = {}
     console.log(`[LocalAudioFeatureEngine] Local audio feature analyzer selected: Essentia; scope=${analysisScope}.`);
     const where = localAudioFeatureWhere(reprocessLocal);
     const candidateCount = await prisma.track.count({ where });
-    console.log(`[LocalAudioFeatureEngine] Found ${candidateCount} tracks missing audio features.`);
+    const startedAt = Date.now();
+    let alreadyAnalyzed = 0;
+    let progressProcessed = 0;
+    let progressFailed = 0;
+    let shutdownLogged = false;
+    console.log(`[LocalAudioFeatureEngine] Found ${candidateCount} tracks needing local Essentia audio feature backfill.`);
     engineBatchSize.observe({ engine: ENGINE }, Math.min(candidateCount, batchSize || candidateCount));
+
+    const logProgress = (force = false) => {
+      const completed = progressProcessed + alreadyAnalyzed + progressFailed;
+      if (!force && completed > 0 && completed % 25 !== 0) return;
+      const elapsedSeconds = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+      const remaining = Math.max(0, candidateCount - completed);
+      console.log(
+        `[LocalAudioFeatureEngine] Progress: processed=${progressProcessed} alreadyAnalyzed=${alreadyAnalyzed} failed=${progressFailed} remaining=${remaining} elapsed=${elapsedSeconds}s`,
+      );
+    };
 
     summary = await safeTrackBatchIterator<any>({
       engineName: "LocalAudioFeatureEngine",
       where,
       orderBy: [{ addedAt: "desc" }, { id: "asc" }],
-      select: {
-        id: true,
-        title: true,
-        plexId: true,
-        ratingKey: true,
-        duration: true,
-        mediaPath: true,
-        artist: { select: { title: true } },
-        album: { select: { title: true } },
-        library: {
-          select: {
-            id: true,
-            name: true,
-            server: { select: { uri: true, accessToken: true } },
-          },
-        },
-        audioFeature: true,
-      },
+      select: localAudioFeatureTrackSelect,
       ...(batchSize ? { take: batchSize } : {}),
       process: async (track) => {
         let outcome: "success" | "not_found" | "error" = "success";
         const endTimer = trackDurationSeconds.startTimer({ engine: ENGINE });
         try {
-          const localFeatures = await analyzeTrackLocally(track, analysisScope);
+          if (shutdownRequested()) {
+            if (!shutdownLogged) {
+              shutdownLogged = true;
+              console.warn(
+                `[LocalAudioFeatureEngine] Shutdown requested. Stopping before next track. processed=${progressProcessed} alreadyAnalyzed=${alreadyAnalyzed} failed=${progressFailed}.`,
+              );
+            }
+            alreadyAnalyzed += 1;
+            return "skipped";
+          }
+
+          const freshTrack = await prisma.track.findUnique({
+            where: { id: track.id },
+            select: localAudioFeatureTrackSelect,
+          });
+          if (!freshTrack || !needsLocalAudioFeatureBackfill(freshTrack, { reprocessLocal })) {
+            alreadyAnalyzed += 1;
+            debugLog(`[LocalAudioFeatureEngine] Skipping already analyzed track ${track.id} ${trackLabel(track)}.`);
+            logProgress();
+            return "skipped";
+          }
+
+          const localFeatures = await analyzeTrackLocally(freshTrack, analysisScope);
           if (localFeatures) {
-            await saveLocalFeatures(track, localFeatures, {
+            await saveLocalFeatures(freshTrack, localFeatures, {
               preferApi,
               force: reprocessLocal,
               allowEstimatedMoodAcousticness,
             });
+            progressProcessed += 1;
           } else {
             outcome = "not_found";
-            await saveFailure(track.id, "no_data", analysisScope, "Essentia analysis completed but produced no usable descriptors.");
+            await saveFailure(freshTrack.id, "no_data", analysisScope, "Essentia analysis completed but produced no usable descriptors.");
+            progressProcessed += 1;
           }
         } catch (error) {
           outcome = "error";
+          progressFailed += 1;
           const message = error instanceof Error ? error.message : String(error);
           if (error instanceof ExtractionFailedAudioFeatureError) {
             await saveFailure(track.id, "extraction_failed", analysisScope, message);
@@ -796,9 +956,11 @@ export const runLocalAudioFeatureEngine = async (options: SyncEngineOptions = {}
         }
 
         if (providerDelayMs > 0) await sleep(providerDelayMs);
+        logProgress();
         return outcome === "error" ? "failed" : "processed";
       },
     });
+    logProgress(true);
 
     const [api, local, noData, failed] = await runWithConcurrency([
       () => prisma.audioFeature.count({ where: { audioFeatureSource: "api", track: { syncStatus: "active" } } }),
@@ -810,6 +972,8 @@ export const runLocalAudioFeatureEngine = async (options: SyncEngineOptions = {}
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[LocalAudioFeatureEngine] Sync failed: ${message}`);
+  } finally {
+    lock.release();
   }
 
   return summary;

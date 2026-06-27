@@ -23,7 +23,7 @@ type SafeTrackBatchOptions<T> = {
   take?: number;
   fetchBatchSize?: number;
   client?: TrackClient;
-  process: (track: T) => Promise<"processed" | "failed" | void>;
+  process: (track: T) => Promise<"processed" | "skipped" | "failed" | void>;
 };
 
 const conversionFailurePattern = /convert rust String into napi string|failed to convert[^\n]*napi string/i;
@@ -160,6 +160,7 @@ export async function safeTrackBatchIterator<T>({
     try {
       const outcome = await process(row);
       if (outcome === "failed") summary.failed += 1;
+      else if (outcome === "skipped") summary.skipped += 1;
       else summary.processed += 1;
     } catch (error) {
       summary.failed += 1;
