@@ -18,6 +18,9 @@ type HealthLibrary = {
   missingAlbums: number;
   missingArtists: number;
   tracksWithBpm: number;
+  bpmApi: number;
+  bpmLocal: number;
+  bpmImported: number;
   missingBpm: number;
   bpmNoData: number;
   bpmFailed: number;
@@ -34,6 +37,8 @@ type HealthLibrary = {
   audioFeaturesFailed: number;
   audioFeaturesExtractionFailed: number;
   audioFeaturesAnalyzerFailed: number;
+  bpmProviderMode: string;
+  audioFeatureProviderMode: string;
   tracksWithGenres: number;
   missingGenres: number;
   genreNoData: number;
@@ -68,8 +73,9 @@ type MissingTrack = {
   album: { title: string };
 };
 
-type BpmFilter = "tracks_with_bpm" | "missing_bpm" | "bpm_no_data" | "bpm_failed" | "extraction_failed" | "analyzer_failed" | "pending_backfill";
-type AudioFilter = "missing_audio_features" | "api_audio_features" | "local_audio_features" | "heuristic_audio_features" | "partial_audio_features" | "audio_feature_no_data" | "audio_feature_failed" | "extraction_failed" | "analyzer_failed";
+type BpmFilter = "tracks_with_bpm" | "api_bpm" | "local_bpm" | "imported_bpm" | "missing_bpm" | "bpm_no_data" | "bpm_failed" | "extraction_failed" | "analyzer_failed" | "pending_backfill" | "pending_bpm";
+type AudioFilter = "missing_audio_features" | "api_audio_features" | "local_audio_features" | "heuristic_audio_features" | "partial_audio_features" | "audio_feature_no_data" | "audio_feature_failed" | "extraction_failed" | "analyzer_failed" | "pending_audio_features";
+type RetryProviderMode = "configured" | "api_only" | "local_only" | "force_local";
 type MetadataSection = "genres" | "popularity";
 type GenreFilter = "tracks_with_genres" | "missing_genres" | "genre_no_data" | "genre_failed" | "pending_genre_backfill";
 type PopularityFilter = "tracks_with_popularity" | "missing_popularity" | "popularity_no_data" | "popularity_failed" | "pending_popularity_backfill";
@@ -85,8 +91,11 @@ type BpmTrack = {
   mediaPath: string | null;
   ratingKey: string;
   effectiveBpm: number | null;
+  apiBpm: number | null;
+  localBpm: number | null;
   bpmSource: string | null;
   bpmConfidence: number | null;
+  bpmAnalysisScope: string | null;
   bpmAnalysisStatus: string;
   bpmFailureReason: string | null;
   bpmAnalyzedAt: string | null;
@@ -108,6 +117,8 @@ type AudioFeatureTrack = {
   bpm: number | null;
   danceability: number | null;
   acousticness: number | null;
+  api: { energy: number | null; mood: number | null; danceability: number | null; acousticness: number | null; loudness: number | null };
+  local: { energy: number | null; mood: number | null; danceability: number | null; acousticness: number | null; loudness: number | null };
   source: string | null;
   analysisScope: string | null;
   confidence: number | null;
@@ -165,22 +176,30 @@ function labelBpm(status: string) {
 
 const bpmFilterLabels: Record<BpmFilter, string> = {
   tracks_with_bpm: "Tracks with BPM",
+  api_bpm: "API BPM",
+  local_bpm: "Local Essentia BPM",
+  imported_bpm: "Imported/legacy BPM",
   missing_bpm: "Missing BPM",
   bpm_no_data: "BPM no data",
   bpm_failed: "BPM failed",
   extraction_failed: "Extraction failed",
   analyzer_failed: "Analyzer failed",
   pending_backfill: "Pending backfill",
+  pending_bpm: "Pending BPM",
 };
 
 const bpmEmptyMessages: Record<BpmFilter, string> = {
   tracks_with_bpm: "No active tracks have a valid BPM yet.",
+  api_bpm: "No active tracks have API BPM yet.",
+  local_bpm: "No active tracks have local Essentia BPM yet.",
+  imported_bpm: "No active tracks have imported or legacy BPM yet.",
   missing_bpm: "Every active track has a valid BPM.",
   bpm_no_data: "No active tracks completed analysis without finding a BPM.",
   bpm_failed: "No active tracks have a terminal BPM failure.",
   extraction_failed: "No active tracks have an extraction failure.",
   analyzer_failed: "No active tracks have an analyzer failure.",
   pending_backfill: "No active tracks are waiting for BPM backfill.",
+  pending_bpm: "No active tracks are waiting for BPM backfill.",
 };
 
 const audioFilterLabels: Record<AudioFilter, string> = {
@@ -193,6 +212,7 @@ const audioFilterLabels: Record<AudioFilter, string> = {
   audio_feature_failed: "Audio failed",
   extraction_failed: "Extraction failed",
   analyzer_failed: "Analyzer failed",
+  pending_audio_features: "Pending audio features",
 };
 
 const audioEmptyMessages: Record<AudioFilter, string> = {
@@ -205,6 +225,7 @@ const audioEmptyMessages: Record<AudioFilter, string> = {
   audio_feature_failed: "No active tracks have terminal audio-feature failures.",
   extraction_failed: "No active tracks have audio extraction failures.",
   analyzer_failed: "No active tracks have Essentia analyzer failures.",
+  pending_audio_features: "No active tracks are waiting for audio-feature backfill.",
 };
 
 const genreFilterLabels: Record<GenreFilter, string> = {
@@ -504,6 +525,20 @@ export default function LibraryHealthPage() {
         return;
       }
 
+      const audioValue = rawFilter as AudioFilter | null;
+      if (section === "audio" && audioValue && audioValue in audioFilterLabels) {
+        setAudioFilter(audioValue);
+        setAudioLibraryId(libraryId);
+        setAudioSearch(search);
+        setAudioAppliedSearch(search);
+        setAudioPage(requestedPage);
+        setMetadataSection(null);
+        setMetadataFilter(null);
+        setBpmFilter(null);
+        void loadAudioTracks(audioValue, libraryId, search, requestedPage);
+        return;
+      }
+
       const value = rawFilter as BpmFilter | null;
       if ((!section || section === "bpm") && value && value in bpmFilterLabels) {
         setBpmFilter(value);
@@ -520,7 +555,7 @@ export default function LibraryHealthPage() {
     restoreFromUrl();
     window.addEventListener("popstate", restoreFromUrl);
     return () => window.removeEventListener("popstate", restoreFromUrl);
-  }, [loadBpmTracks, loadMetadataTracks]);
+  }, [loadAudioTracks, loadBpmTracks, loadMetadataTracks]);
 
   const runAction = async (key: string, url: string, body: Record<string, unknown>) => {
     setWorking(key);
@@ -591,14 +626,15 @@ export default function LibraryHealthPage() {
     }
   };
 
-  const retryBpm = async (payload: { trackIds?: string[]; filter?: BpmFilter; libraryId?: string }) => {
-    const data = await runAction("bpm-retry", "/api/settings/library-health/bpm-retry", { ...payload, force: false });
+  const retryBpm = async (payload: { trackIds?: string[]; filter?: BpmFilter; libraryId?: string; providerMode?: RetryProviderMode }) => {
+    const providerMode = payload.providerMode || "configured";
+    const data = await runAction("bpm-retry", "/api/settings/library-health/bpm-retry", { ...payload, force: providerMode === "force_local", providerMode });
     if (!data) return;
     if (data.queued > 0) {
       const startResponse = await fetch("/api/sync/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ engine: "bpm" }),
+        body: JSON.stringify({ engine: "bpm", providerMode }),
       });
       const startData = await startResponse.json().catch(() => ({}));
       const suffix = startResponse.ok
@@ -612,14 +648,15 @@ export default function LibraryHealthPage() {
     if (bpmFilter) await loadBpmTracks(bpmFilter, bpmLibraryId, bpmAppliedSearch, bpmPage);
   };
 
-  const retryAudioFeatures = async (payload: { trackIds?: string[]; filter?: AudioFilter; libraryId?: string }) => {
-    const data = await runAction("audio-feature-retry", "/api/settings/library-health/audio-feature-retry", { ...payload, force: false });
+  const retryAudioFeatures = async (payload: { trackIds?: string[]; filter?: AudioFilter; libraryId?: string; providerMode?: RetryProviderMode }) => {
+    const providerMode = payload.providerMode || "configured";
+    const data = await runAction("audio-feature-retry", "/api/settings/library-health/audio-feature-retry", { ...payload, force: providerMode === "force_local", providerMode });
     if (!data) return;
     if (data.queued > 0) {
       const startResponse = await fetch("/api/sync/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ engine: "audio" }),
+        body: JSON.stringify({ engine: "audio", providerMode }),
       });
       const startData = await startResponse.json().catch(() => ({}));
       const suffix = startResponse.ok
@@ -676,6 +713,12 @@ export default function LibraryHealthPage() {
   const metadataSelectedCount = metadataSelected.size;
   const allVisibleMetadataSelected = metadataTracks.length > 0 && metadataTracks.every((track) => metadataSelected.has(track.id));
   const totalActive = useMemo(() => libraries.reduce((sum, library) => sum + library.activeTracks, 0), [libraries]);
+  const bpmMode = libraries[0]?.bpmProviderMode || "Disabled";
+  const audioMode = libraries[0]?.audioFeatureProviderMode || "Disabled";
+  const bpmApiEnabled = bpmMode.includes("API");
+  const bpmLocalEnabled = bpmMode.includes("Local");
+  const audioApiEnabled = audioMode.includes("API");
+  const audioLocalEnabled = audioMode.includes("Local");
 
   if (loading) return <div className={styles.loading}><Loader2 className="animate-spin" /> Loading library healthâ€¦</div>;
 
@@ -716,15 +759,19 @@ export default function LibraryHealthPage() {
               <div><span>Difference</span><b className={library.difference === 0 ? styles.good : styles.bad}>{library.difference === null ? "â€”" : library.difference > 0 ? `+${library.difference}` : library.difference}</b></div>
             </div>
             <h4 className={styles.healthGroupTitle}>BPM Health</h4>
+            <p className={styles.healthGroupCopy}>Mode: {library.bpmProviderMode}</p>
             <div className={styles.bpmGrid}>
               {([
                 ["tracks_with_bpm", library.tracksWithBpm],
+                ["api_bpm", library.bpmApi],
+                ["local_bpm", library.bpmLocal],
+                ["imported_bpm", library.bpmImported],
                 ["missing_bpm", library.missingBpm],
                 ["bpm_no_data", library.bpmNoData],
                 ["bpm_failed", library.bpmFailed],
                 ["extraction_failed", library.bpmExtractionFailed],
                 ["analyzer_failed", library.bpmAnalyzerFailed],
-                ["pending_backfill", library.bpmPendingBackfill],
+                ["pending_bpm", library.bpmPendingBackfill],
               ] as [BpmFilter, number][]).map(([filter, count]) => (
                 <button
                   type="button"
@@ -739,17 +786,19 @@ export default function LibraryHealthPage() {
               ))}
             </div>
             <h4 className={styles.healthGroupTitle}>Audio Feature Health</h4>
+            <p className={styles.healthGroupCopy}>Mode: {library.audioFeatureProviderMode}</p>
             <div className={styles.bpmGrid} aria-label="Audio feature health">
               {([
-                ["missing_audio_features", library.audioFeaturesMissing],
                 ["api_audio_features", library.audioFeaturesApi],
                 ["local_audio_features", library.audioFeaturesLocal],
                 ["heuristic_audio_features", library.audioFeaturesHeuristic],
                 ["partial_audio_features", library.audioFeaturesPartial],
+                ["missing_audio_features", library.audioFeaturesMissing],
                 ["audio_feature_no_data", library.audioFeaturesNoData],
                 ["audio_feature_failed", library.audioFeaturesFailed],
                 ["extraction_failed", library.audioFeaturesExtractionFailed],
                 ["analyzer_failed", library.audioFeaturesAnalyzerFailed],
+                ["pending_audio_features", library.audioFeaturesMissing],
               ] as [AudioFilter, number][]).map(([filter, count]) => (
                 <button
                   type="button"
@@ -938,25 +987,27 @@ export default function LibraryHealthPage() {
 
         <div className={styles.actionBar}>
           <button className={styles.secondaryButton} disabled={!audioSelectedCount || working !== null} onClick={() => void retryAudioFeatures({ trackIds: Array.from(audioSelected), libraryId: audioLibraryId || undefined })}><RefreshCw size={15} /> Retry selected ({audioSelectedCount})</button>
-          <button className={styles.primaryButton} disabled={working !== null || audioPagination.total === 0 || audioFilter === "api_audio_features" || audioFilter === "local_audio_features"} onClick={() => void retryAudioFeatures({ filter: audioFilter, libraryId: audioLibraryId || undefined })}>
-            {working === "audio-feature-retry" ? <Loader2 className="animate-spin" size={15} /> : <RefreshCw size={15} />} Retry all in filter
+          <button className={styles.primaryButton} disabled={working !== null || audioPagination.total === 0} onClick={() => void retryAudioFeatures({ filter: audioFilter, libraryId: audioLibraryId || undefined })}>
+            {working === "audio-feature-retry" ? <Loader2 className="animate-spin" size={15} /> : <RefreshCw size={15} />} Retry using configured providers
           </button>
+          {audioApiEnabled && <button className={styles.secondaryButton} disabled={working !== null || audioPagination.total === 0} onClick={() => void retryAudioFeatures({ filter: audioFilter, libraryId: audioLibraryId || undefined, providerMode: "api_only" })}>Retry using API only</button>}
+          {audioLocalEnabled && <button className={styles.secondaryButton} disabled={working !== null || audioPagination.total === 0} onClick={() => void retryAudioFeatures({ filter: audioFilter, libraryId: audioLibraryId || undefined, providerMode: "local_only" })}>Retry using local Essentia only</button>}
+          {audioLocalEnabled && <button className={styles.secondaryButton} disabled={working !== null || audioPagination.total === 0} onClick={() => void retryAudioFeatures({ filter: audioFilter, libraryId: audioLibraryId || undefined, providerMode: "force_local" })}>Force local reprocess</button>}
         </div>
 
         {audioLoading ? <div className={styles.loading}><Loader2 className="animate-spin" size={18} /> Loading {audioFilterLabels[audioFilter].toLowerCase()}...</div> : <>
           <div className={`${styles.tableWrap} ${styles.bpmTableWrap}`}>
             <table>
-              <thead><tr><th><input type="checkbox" aria-label="Select visible audio-feature tracks" checked={allVisibleAudioSelected} onChange={() => setAudioSelected(allVisibleAudioSelected ? new Set() : new Set(audioTracks.map((track) => track.id)))} /></th><th>Track</th><th>Artist</th><th>Album</th><th>Energy</th><th>Mood</th><th>BPM</th><th>Danceability</th><th>Acousticness</th><th>Source</th><th>Scope</th><th>Confidence</th><th>Status</th><th>Failure reason</th><th>Analyzed</th><th>Media path</th><th>Actions</th></tr></thead>
+              <thead><tr><th><input type="checkbox" aria-label="Select visible audio-feature tracks" checked={allVisibleAudioSelected} onChange={() => setAudioSelected(allVisibleAudioSelected ? new Set() : new Set(audioTracks.map((track) => track.id)))} /></th><th>Track</th><th>Artist</th><th>Album</th><th>Effective</th><th>API values</th><th>Local values</th><th>BPM</th><th>Source</th><th>Scope</th><th>Confidence</th><th>Status</th><th>Failure reason</th><th>Analyzed</th><th>Media path</th><th>Actions</th></tr></thead>
               <tbody>{audioTracks.map((track) => <tr key={track.id}>
                 <td><input type="checkbox" aria-label={`Select ${track.title}`} checked={audioSelected.has(track.id)} onChange={() => setAudioSelected((current) => { const next = new Set(current); next.has(track.id) ? next.delete(track.id) : next.add(track.id); return next; })} /></td>
                 <td data-label="Track"><strong>{track.title}</strong><small className={styles.trackMeta}>{track.library.name} | {formatDuration(track.duration)} | {track.ratingKey}</small></td>
                 <td data-label="Artist">{track.artist}</td>
                 <td data-label="Album">{track.album}</td>
-                <td data-label="Energy">{formatFeature(track.energy)}</td>
-                <td data-label="Mood">{formatFeature(track.mood)}</td>
+                <td data-label="Effective">E {formatFeature(track.energy)}<small className={styles.trackMeta}>Mood {formatFeature(track.mood)} | Dance {formatFeature(track.danceability)} | Acoustic {formatFeature(track.acousticness)}</small></td>
+                <td data-label="API values">E {formatFeature(track.api.energy)}<small className={styles.trackMeta}>Mood {formatFeature(track.api.mood)} | Dance {formatFeature(track.api.danceability)} | Acoustic {formatFeature(track.api.acousticness)}</small></td>
+                <td data-label="Local values">E {formatFeature(track.local.energy)}<small className={styles.trackMeta}>Mood {formatFeature(track.local.mood)} | Dance {formatFeature(track.local.danceability)} | Acoustic {formatFeature(track.local.acousticness)}</small></td>
                 <td data-label="BPM">{track.bpm === null ? "â€”" : Math.round(track.bpm * 10) / 10}</td>
-                <td data-label="Danceability">{formatFeature(track.danceability)}</td>
-                <td data-label="Acousticness">{formatFeature(track.acousticness)}</td>
                 <td data-label="Source">{track.source || "â€”"}</td>
                 <td data-label="Scope">{track.analysisScope || "â€”"}</td>
                 <td data-label="Confidence">{track.confidence === null ? "â€”" : `${Math.round(track.confidence * 100)}%`}</td>
@@ -1007,22 +1058,28 @@ export default function LibraryHealthPage() {
 
         <div className={styles.actionBar}>
           <button className={styles.secondaryButton} disabled={!bpmSelectedCount || working !== null} onClick={() => void retryBpm({ trackIds: Array.from(bpmSelected), libraryId: bpmLibraryId || undefined })}><RefreshCw size={15} /> Retry selected ({bpmSelectedCount})</button>
-          <button className={styles.primaryButton} disabled={working !== null || bpmPagination.total === 0 || bpmFilter === "tracks_with_bpm"} onClick={() => void retryBpm({ filter: bpmFilter, libraryId: bpmLibraryId || undefined })}>
-            {working === "bpm-retry" ? <Loader2 className="animate-spin" size={15} /> : <RefreshCw size={15} />} Retry all in filter
+          <button className={styles.primaryButton} disabled={working !== null || bpmPagination.total === 0} onClick={() => void retryBpm({ filter: bpmFilter, libraryId: bpmLibraryId || undefined })}>
+            {working === "bpm-retry" ? <Loader2 className="animate-spin" size={15} /> : <RefreshCw size={15} />} Retry using configured providers
           </button>
+          {bpmApiEnabled && <button className={styles.secondaryButton} disabled={working !== null || bpmPagination.total === 0} onClick={() => void retryBpm({ filter: bpmFilter, libraryId: bpmLibraryId || undefined, providerMode: "api_only" })}>Retry using API only</button>}
+          {bpmLocalEnabled && <button className={styles.secondaryButton} disabled={working !== null || bpmPagination.total === 0} onClick={() => void retryBpm({ filter: bpmFilter, libraryId: bpmLibraryId || undefined, providerMode: "local_only" })}>Retry using local Essentia only</button>}
+          {bpmLocalEnabled && <button className={styles.secondaryButton} disabled={working !== null || bpmPagination.total === 0} onClick={() => void retryBpm({ filter: bpmFilter, libraryId: bpmLibraryId || undefined, providerMode: "force_local" })}>Force local reprocess</button>}
         </div>
 
         {bpmLoading ? <div className={styles.loading}><Loader2 className="animate-spin" size={18} /> Loading {bpmFilterLabels[bpmFilter].toLowerCase()}â€¦</div> : <>
           <div className={`${styles.tableWrap} ${styles.bpmTableWrap}`}>
             <table>
-              <thead><tr><th><input type="checkbox" aria-label="Select visible BPM tracks" checked={allVisibleBpmSelected} onChange={() => setBpmSelected(allVisibleBpmSelected ? new Set() : new Set(bpmTracks.map((track) => track.id)))} /></th><th>Track</th><th>Artist</th><th>Album</th><th>BPM</th><th>BPM source</th><th>BPM status</th><th>Failure reason</th><th>Last analyzed</th><th>Media path</th><th>Actions</th></tr></thead>
+              <thead><tr><th><input type="checkbox" aria-label="Select visible BPM tracks" checked={allVisibleBpmSelected} onChange={() => setBpmSelected(allVisibleBpmSelected ? new Set() : new Set(bpmTracks.map((track) => track.id)))} /></th><th>Track</th><th>Artist</th><th>Album</th><th>Effective BPM</th><th>API BPM</th><th>Local BPM</th><th>Source</th><th>Scope</th><th>Status</th><th>Failure reason</th><th>Last analyzed</th><th>Media path</th><th>Actions</th></tr></thead>
               <tbody>{bpmTracks.map((track) => <tr key={track.id}>
                 <td><input type="checkbox" aria-label={`Select ${track.title}`} checked={bpmSelected.has(track.id)} onChange={() => setBpmSelected((current) => { const next = new Set(current); next.has(track.id) ? next.delete(track.id) : next.add(track.id); return next; })} /></td>
                 <td data-label="Track"><strong>{track.title}</strong><small className={styles.trackMeta}>{track.library.name} | {formatDuration(track.duration)} | {track.ratingKey}</small></td>
                 <td data-label="Artist">{track.artist}</td>
                 <td data-label="Album">{track.album}</td>
                 <td data-label="BPM">{track.effectiveBpm === null ? "â€”" : Math.round(track.effectiveBpm * 10) / 10}</td>
+                <td data-label="API BPM">{track.apiBpm === null ? "â€”" : Math.round(track.apiBpm * 10) / 10}</td>
+                <td data-label="Local BPM">{track.localBpm === null ? "â€”" : Math.round(track.localBpm * 10) / 10}</td>
                 <td data-label="BPM source">{track.bpmSource || "â€”"}{track.bpmConfidence !== null && <small className={styles.trackMeta}>{Math.round(track.bpmConfidence * 100)}% confidence</small>}</td>
+                <td data-label="Scope">{track.bpmAnalysisScope || "â€”"}</td>
                 <td data-label="BPM status"><span className={styles.bpmBadge}>{labelBpm(track.bpmAnalysisStatus)}</span></td>
                 <td data-label="Failure reason" className={styles.failureReason} title={track.bpmFailureReason || ""}>{track.bpmFailureReason || "â€”"}</td>
                 <td data-label="Last analyzed">{formatDate(track.bpmAnalyzedAt)}</td>

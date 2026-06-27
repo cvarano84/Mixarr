@@ -10,6 +10,7 @@ const requestSchema = z.object({
   filter: z.string().optional(),
   libraryId: z.string().uuid().optional(),
   force: z.boolean().default(false),
+  providerMode: z.enum(["configured", "api_only", "local_only", "force_local"]).default("configured"),
 }).refine((body) => (body.trackIds?.length || 0) > 0 || !!body.filter, {
   message: "Provide trackIds or a filter",
 });
@@ -23,7 +24,7 @@ export async function POST(request: Request) {
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message || "Invalid retry request" }, { status: 400 });
     }
-    const { trackIds, filter, libraryId, force } = parsed.data;
+    const { trackIds, filter, libraryId, force, providerMode } = parsed.data;
     if (!trackIds?.length && !isBpmHealthFilter(filter)) {
       return NextResponse.json({ error: "A valid BPM health filter is required" }, { status: 400 });
     }
@@ -38,7 +39,7 @@ export async function POST(request: Request) {
           library: { ...(libraryId ? { id: libraryId } : {}), server: { userId } },
         },
         targetWhere,
-        ...(force ? [] : [missingEffectiveBpmTrackWhere()]),
+        ...(force || providerMode === "force_local" ? [] : [missingEffectiveBpmTrackWhere()]),
       ],
     };
     const matching = await prisma.track.findMany({
@@ -53,7 +54,6 @@ export async function POST(request: Request) {
         prisma.track.updateMany({
           where: { id: { in: chunk } },
           data: {
-            ...(force ? { bpm: null, bpmSource: null, bpmConfidence: null } : {}),
             bpmAnalysisStatus: null,
             bpmFailureReason: null,
             bpmAnalyzedAt: null,
@@ -62,7 +62,6 @@ export async function POST(request: Request) {
         prisma.audioFeature.updateMany({
           where: { trackId: { in: chunk } },
           data: {
-            ...(force ? { tempo: null } : {}),
             tempoSource: null,
             tempoConfidence: null,
           },
@@ -75,7 +74,7 @@ export async function POST(request: Request) {
     } else {
       console.log(`[LibraryHealth] Queued BPM retry for filter ${filter || "selected_tracks"}: ${matching.length} tracks`);
     }
-    return NextResponse.json({ queued: matching.length, trackIds: ids });
+    return NextResponse.json({ queued: matching.length, trackIds: ids, providerMode });
   } catch (error) {
     console.error("[LibraryHealth] Failed to queue BPM retry", error);
     return NextResponse.json({ error: "Failed to queue BPM retry" }, { status: 500 });

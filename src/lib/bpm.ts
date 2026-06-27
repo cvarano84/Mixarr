@@ -5,10 +5,12 @@ export type BpmAnalysisStatus = typeof bpmAnalysisStatuses[number];
 
 export type TrackWithBpmSources = {
   bpm?: unknown;
+  apiBpm?: unknown;
+  localBpm?: unknown;
+  effectiveBpm?: unknown;
   bpmAnalysisStatus?: unknown;
   bpmAnalyzedAt?: unknown;
   tempo?: unknown;
-  localBpm?: unknown;
   analyzedBpm?: unknown;
   audioFeature?: {
     bpm?: unknown;
@@ -31,7 +33,9 @@ export function getValidBpm(value: unknown) {
 
 export function getEffectiveBpm(track: TrackWithBpmSources) {
   const candidates = [
+    track.effectiveBpm,
     track.bpm,
+    track.apiBpm,
     track.localBpm,
     track.audioFeatures?.bpm,
     track.audioFeatures?.tempo,
@@ -57,6 +61,9 @@ export function effectiveBpmTrackWhere(
   return {
     OR: [
       { bpm: condition as Prisma.FloatNullableFilter<"Track"> | number },
+      { effectiveBpm: condition as Prisma.FloatNullableFilter<"Track"> | number },
+      { apiBpm: condition as Prisma.FloatNullableFilter<"Track"> | number },
+      { localBpm: condition as Prisma.FloatNullableFilter<"Track"> | number },
       {
         AND: [
           {
@@ -89,6 +96,24 @@ export function missingEffectiveBpmTrackWhere(): Prisma.TrackWhereInput {
       },
       {
         OR: [
+          { effectiveBpm: null },
+          { effectiveBpm: { lte: 0 } },
+        ],
+      },
+      {
+        OR: [
+          { apiBpm: null },
+          { apiBpm: { lte: 0 } },
+        ],
+      },
+      {
+        OR: [
+          { localBpm: null },
+          { localBpm: { lte: 0 } },
+        ],
+      },
+      {
+        OR: [
           { audioFeature: null },
           {
             audioFeature: {
@@ -108,15 +133,46 @@ export function missingEffectiveBpmTrackWhere(): Prisma.TrackWhereInput {
 
 export function localBpmSourceTrackWhere(): Prisma.TrackWhereInput {
   return {
-    audioFeature: {
-      is: {
+    OR: [
+      { localBpm: { gt: 0 } },
+      { bpmSource: { in: ["local_essentia", "essentia", "aubio"] } },
+      {
+        audioFeature: {
+          is: {
+            OR: [
+              { tempoSource: { startsWith: "Essentia" } },
+              { tempoSource: { startsWith: "Aubio" } },
+              { tempoSource: { in: ["local_not_found", "local_failed", "local_extraction_failed", "local_analyzer_failed"] } },
+            ],
+          },
+        },
+      },
+    ],
+  };
+}
+
+export function apiBpmTrackWhere(): Prisma.TrackWhereInput {
+  return {
+    OR: [
+      { apiBpm: { gt: 0 } },
+      { bpmSource: { in: ["api", "deezer"] } },
+    ],
+  };
+}
+
+export function importedBpmTrackWhere(): Prisma.TrackWhereInput {
+  return {
+    AND: [
+      effectiveBpmTrackWhere(),
+      { apiBpm: null },
+      { localBpm: null },
+      {
         OR: [
-          { tempoSource: { startsWith: "Essentia" } },
-          { tempoSource: { startsWith: "Aubio" } },
-          { tempoSource: { in: ["local_not_found", "local_failed", "local_extraction_failed", "local_analyzer_failed"] } },
+          { bpmSource: null },
+          { bpmSource: { notIn: ["api", "deezer", "local_essentia", "essentia", "aubio"] } },
         ],
       },
-    },
+    ],
   };
 }
 

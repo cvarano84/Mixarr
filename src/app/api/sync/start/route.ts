@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { runSyncEngine } from "@/lib/syncEngine";
-import { getUserSyncSettings } from "@/lib/syncSettings";
+import { getUserSyncSettings, resolveMetadataProviderSettings } from "@/lib/syncSettings";
 import { alreadyRunningPayload, startSyncJobInBackground } from "@/lib/syncJobRunner";
 
 export async function POST(req: Request) {
@@ -14,8 +14,23 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { libraryId, engine = 'plex' } = body;
-    const syncSettings = await getUserSyncSettings(userId);
+    const { libraryId, engine = 'plex', providerMode } = body;
+    const baseSyncSettings = await getUserSyncSettings(userId);
+    const syncSettings = {
+      ...baseSyncSettings,
+      ...(engine === "bpm" && providerMode === "api_only" ? { enableApiBpm: true, enableLocalBpm: false } : {}),
+      ...(engine === "bpm" && (providerMode === "local_only" || providerMode === "force_local") ? {
+        enableApiBpm: false,
+        enableLocalBpm: true,
+        reprocessApiBpmWithLocal: providerMode === "force_local",
+      } : {}),
+      ...(engine === "audio" && providerMode === "api_only" ? { enableApiAudioFeatures: true, enableLocalAudioFeatures: false } : {}),
+      ...(engine === "audio" && (providerMode === "local_only" || providerMode === "force_local") ? {
+        enableApiAudioFeatures: false,
+        enableLocalAudioFeatures: true,
+        reprocessApiAudioFeaturesWithLocal: providerMode === "force_local",
+      } : {}),
+    };
     let started;
 
     if (engine === 'initial') {
@@ -98,7 +113,8 @@ async function runInitialEnrichment(syncSettings: Awaited<ReturnType<typeof getU
   await popularity.runPopularityEngine(syncSettings);
   await tags.runTrackTagEngine(syncSettings);
   await audio.runAudioFeatureEngine(syncSettings);
-  if (localAudioFeaturesAutoBackfillEnabled()) {
+  const metadataSettings = resolveMetadataProviderSettings(syncSettings);
+  if (metadataSettings.audioFeatures.local && (!metadataSettings.audioFeatures.api || localAudioFeaturesAutoBackfillEnabled())) {
     await (await import('@/lib/localAudioFeatureEngine')).runLocalAudioFeatureEngine(syncSettings);
   } else {
     console.log("[InitialSync] Skipping local Essentia audio feature backfill; set LOCAL_AUDIO_FEATURES_AUTO_BACKFILL=1 to include it in automatic initial enrichment.");

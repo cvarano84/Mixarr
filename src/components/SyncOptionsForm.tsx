@@ -15,6 +15,15 @@ type SyncOptionKey =
 
 type FormState = Record<SyncOptionKey, string> & {
   bpmReprocessNoDataFailed: boolean;
+  enableApiBpm: boolean;
+  enableLocalBpm: boolean;
+  preferLocalBpm: boolean;
+  reprocessApiBpmWithLocal: boolean;
+  localBpmAnalysisScope: "windows" | "whole_track" | "";
+  enableApiAudioFeatures: boolean;
+  enableLocalAudioFeatures: boolean;
+  preferLocalAudioFeatures: boolean;
+  reprocessApiAudioFeaturesWithLocal: boolean;
   enableLocalAudioFeatureFallback: boolean;
   preferApiAudioFeatures: boolean;
   allowEstimatedMoodAcousticness: boolean;
@@ -33,6 +42,15 @@ const emptyState: FormState = {
   audioFeatureMinimumConfidence: "",
   providerDelayMs: "",
   bpmReprocessNoDataFailed: false,
+  enableApiBpm: true,
+  enableLocalBpm: true,
+  preferLocalBpm: false,
+  reprocessApiBpmWithLocal: false,
+  localBpmAnalysisScope: "",
+  enableApiAudioFeatures: true,
+  enableLocalAudioFeatures: true,
+  preferLocalAudioFeatures: false,
+  reprocessApiAudioFeaturesWithLocal: false,
   enableLocalAudioFeatureFallback: true,
   preferApiAudioFeatures: true,
   allowEstimatedMoodAcousticness: true,
@@ -111,6 +129,15 @@ export default function SyncOptionsForm() {
         nextState[key] = value === null || value === undefined ? "" : String(value);
       });
       nextState.bpmReprocessNoDataFailed = res.data?.bpmReprocessNoDataFailed === true;
+      nextState.enableApiBpm = res.data?.enableApiBpm !== false;
+      nextState.enableLocalBpm = res.data?.enableLocalBpm !== false;
+      nextState.preferLocalBpm = res.data?.preferLocalBpm === true;
+      nextState.reprocessApiBpmWithLocal = res.data?.reprocessApiBpmWithLocal === true;
+      nextState.localBpmAnalysisScope = res.data?.localBpmAnalysisScope === "whole_track" ? "whole_track" : res.data?.localBpmAnalysisScope === "windows" ? "windows" : "";
+      nextState.enableApiAudioFeatures = res.data?.enableApiAudioFeatures !== false;
+      nextState.enableLocalAudioFeatures = res.data?.enableLocalAudioFeatures ?? res.data?.enableLocalAudioFeatureFallback !== false;
+      nextState.preferLocalAudioFeatures = res.data?.preferLocalAudioFeatures === true;
+      nextState.reprocessApiAudioFeaturesWithLocal = res.data?.reprocessApiAudioFeaturesWithLocal === true;
       nextState.enableLocalAudioFeatureFallback = res.data?.enableLocalAudioFeatureFallback !== false;
       nextState.preferApiAudioFeatures = res.data?.preferApiAudioFeatures !== false;
       nextState.allowEstimatedMoodAcousticness = res.data?.allowEstimatedMoodAcousticness !== false;
@@ -134,8 +161,17 @@ export default function SyncOptionsForm() {
       const res = await axios.put("/api/settings/sync-options", {
         ...payload,
         bpmReprocessNoDataFailed: form.bpmReprocessNoDataFailed,
-        enableLocalAudioFeatureFallback: form.enableLocalAudioFeatureFallback,
-        preferApiAudioFeatures: form.preferApiAudioFeatures,
+        enableApiBpm: form.enableApiBpm,
+        enableLocalBpm: form.enableLocalBpm,
+        preferLocalBpm: form.preferLocalBpm,
+        reprocessApiBpmWithLocal: form.reprocessApiBpmWithLocal,
+        localBpmAnalysisScope: form.localBpmAnalysisScope || null,
+        enableApiAudioFeatures: form.enableApiAudioFeatures,
+        enableLocalAudioFeatures: form.enableLocalAudioFeatures,
+        preferLocalAudioFeatures: form.preferLocalAudioFeatures,
+        reprocessApiAudioFeaturesWithLocal: form.reprocessApiAudioFeaturesWithLocal,
+        enableLocalAudioFeatureFallback: form.enableLocalAudioFeatures,
+        preferApiAudioFeatures: !form.preferLocalAudioFeatures,
         allowEstimatedMoodAcousticness: form.allowEstimatedMoodAcousticness,
         reprocessLocalAudioFeatures: form.reprocessLocalAudioFeatures,
         localAudioFeaturesScope: form.localAudioFeaturesScope || null,
@@ -148,6 +184,15 @@ export default function SyncOptionsForm() {
         nextState[key] = value === null || value === undefined ? "" : String(value);
       });
       nextState.bpmReprocessNoDataFailed = res.data?.bpmReprocessNoDataFailed === true;
+      nextState.enableApiBpm = res.data?.enableApiBpm !== false;
+      nextState.enableLocalBpm = res.data?.enableLocalBpm !== false;
+      nextState.preferLocalBpm = res.data?.preferLocalBpm === true;
+      nextState.reprocessApiBpmWithLocal = res.data?.reprocessApiBpmWithLocal === true;
+      nextState.localBpmAnalysisScope = res.data?.localBpmAnalysisScope === "whole_track" ? "whole_track" : res.data?.localBpmAnalysisScope === "windows" ? "windows" : "";
+      nextState.enableApiAudioFeatures = res.data?.enableApiAudioFeatures !== false;
+      nextState.enableLocalAudioFeatures = res.data?.enableLocalAudioFeatures ?? res.data?.enableLocalAudioFeatureFallback !== false;
+      nextState.preferLocalAudioFeatures = res.data?.preferLocalAudioFeatures === true;
+      nextState.reprocessApiAudioFeaturesWithLocal = res.data?.reprocessApiAudioFeaturesWithLocal === true;
       nextState.enableLocalAudioFeatureFallback = res.data?.enableLocalAudioFeatureFallback !== false;
       nextState.preferApiAudioFeatures = res.data?.preferApiAudioFeatures !== false;
       nextState.allowEstimatedMoodAcousticness = res.data?.allowEstimatedMoodAcousticness !== false;
@@ -174,6 +219,15 @@ export default function SyncOptionsForm() {
         nextState[key] = value === null || value === undefined ? "" : String(value);
       });
       nextState.bpmReprocessNoDataFailed = res.data?.bpmReprocessNoDataFailed === true;
+      nextState.enableApiBpm = res.data?.enableApiBpm !== false;
+      nextState.enableLocalBpm = res.data?.enableLocalBpm !== false;
+      nextState.preferLocalBpm = res.data?.preferLocalBpm === true;
+      nextState.reprocessApiBpmWithLocal = res.data?.reprocessApiBpmWithLocal === true;
+      nextState.localBpmAnalysisScope = res.data?.localBpmAnalysisScope === "whole_track" ? "whole_track" : res.data?.localBpmAnalysisScope === "windows" ? "windows" : "";
+      nextState.enableApiAudioFeatures = res.data?.enableApiAudioFeatures !== false;
+      nextState.enableLocalAudioFeatures = res.data?.enableLocalAudioFeatures ?? res.data?.enableLocalAudioFeatureFallback !== false;
+      nextState.preferLocalAudioFeatures = res.data?.preferLocalAudioFeatures === true;
+      nextState.reprocessApiAudioFeaturesWithLocal = res.data?.reprocessApiAudioFeaturesWithLocal === true;
       nextState.enableLocalAudioFeatureFallback = res.data?.enableLocalAudioFeatureFallback !== false;
       nextState.preferApiAudioFeatures = res.data?.preferApiAudioFeatures !== false;
       nextState.allowEstimatedMoodAcousticness = res.data?.allowEstimatedMoodAcousticness !== false;
@@ -219,17 +273,105 @@ export default function SyncOptionsForm() {
         ))}
       </div>
 
+      <div style={sectionGroupStyle}>
+        <div>
+          <h4 style={sectionTitleStyle}>BPM / Tempo Providers</h4>
+          <p style={sectionCopyStyle}>API mode uses external metadata/audio feature providers when available. Local Essentia mode analyzes your local media files directly. This is slower but self-hosted and works when API data is missing.</p>
+        </div>
+        <label style={toggleStyle}>
+          <input
+            type="checkbox"
+            checked={form.enableApiBpm}
+            onChange={(event) => setForm((current) => ({ ...current, enableApiBpm: event.target.checked }))}
+            style={checkboxStyle}
+          />
+          <span style={{ display: "grid", gap: "0.25rem" }}>
+            <span style={labelStyle}>Enable API BPM lookup</span>
+            <span style={hintStyle}>Uses external metadata/audio feature providers when available.</span>
+          </span>
+        </label>
+        <label style={toggleStyle}>
+          <input
+            type="checkbox"
+            checked={form.enableLocalBpm}
+            onChange={(event) => setForm((current) => ({ ...current, enableLocalBpm: event.target.checked }))}
+            style={checkboxStyle}
+          />
+          <span style={{ display: "grid", gap: "0.25rem" }}>
+            <span style={labelStyle}>Enable local Essentia BPM analysis</span>
+            <span style={hintStyle}>Analyzes your local media files directly. This is slower but self-hosted and works when API data is missing.</span>
+          </span>
+        </label>
+        <label style={toggleStyle}>
+          <input
+            type="checkbox"
+            checked={form.preferLocalBpm}
+            onChange={(event) => setForm((current) => ({ ...current, preferLocalBpm: event.target.checked }))}
+            style={checkboxStyle}
+          />
+          <span style={{ display: "grid", gap: "0.25rem" }}>
+            <span style={labelStyle}>Prefer local BPM over API BPM</span>
+            <span style={hintStyle}>Use local Essentia values as the effective value when both API and local data exist.</span>
+          </span>
+        </label>
+        <label style={toggleStyle}>
+          <input
+            type="checkbox"
+            checked={form.reprocessApiBpmWithLocal}
+            onChange={(event) => setForm((current) => ({ ...current, reprocessApiBpmWithLocal: event.target.checked }))}
+            style={checkboxStyle}
+          />
+          <span style={{ display: "grid", gap: "0.25rem" }}>
+            <span style={labelStyle}>Reprocess existing API BPM with local Essentia</span>
+            <span style={hintStyle}>Queue local analysis even for tracks that already have API BPM data.</span>
+          </span>
+        </label>
+        <label style={{ display: "grid", gap: "0.35rem" }}>
+          <span style={labelStyle}>BPM analysis scope</span>
+          <select
+            value={form.localBpmAnalysisScope}
+            onChange={(event) => setForm((current) => ({
+              ...current,
+              localBpmAnalysisScope: event.target.value === "whole_track" ? "whole_track" : event.target.value === "windows" ? "windows" : "",
+            }))}
+            style={inputStyle}
+          >
+            <option value="">Use LOCAL_BPM_ANALYSIS_SCOPE env default</option>
+            <option value="windows">Window samples, faster</option>
+            <option value="whole_track">Whole track, slower but potentially more accurate</option>
+          </select>
+        </label>
+      </div>
+
+      <div style={sectionGroupStyle}>
+        <div>
+          <h4 style={sectionTitleStyle}>Audio Feature Providers</h4>
+          <p style={sectionCopyStyle}>API mode uses external metadata/audio feature providers when available. Local Essentia mode analyzes your local media files directly. This is slower but self-hosted and works when API data is missing.</p>
+        </div>
+        <label style={toggleStyle}>
+          <input
+            type="checkbox"
+            checked={form.enableApiAudioFeatures}
+            onChange={(event) => setForm((current) => ({ ...current, enableApiAudioFeatures: event.target.checked }))}
+            style={checkboxStyle}
+          />
+          <span style={{ display: "grid", gap: "0.25rem" }}>
+            <span style={labelStyle}>Enable API Audio Feature lookup</span>
+            <span style={hintStyle}>Uses external metadata/audio feature providers when available.</span>
+          </span>
+        </label>
+
       <label style={toggleStyle}>
         <input
           type="checkbox"
-          checked={form.enableLocalAudioFeatureFallback}
-          onChange={(event) => setForm((current) => ({ ...current, enableLocalAudioFeatureFallback: event.target.checked }))}
+          checked={form.enableLocalAudioFeatures}
+          onChange={(event) => setForm((current) => ({ ...current, enableLocalAudioFeatures: event.target.checked }))}
           style={checkboxStyle}
         />
         <span style={{ display: "grid", gap: "0.25rem" }}>
-          <span style={labelStyle}>Enable local audio feature fallback</span>
+          <span style={labelStyle}>Enable local Essentia Audio Feature analysis</span>
           <span style={hintStyle}>
-            Analyze local files with Essentia when API providers do not return complete audio features.
+            Analyzes your local media files directly. This is slower but self-hosted and works when API data is missing.
           </span>
         </span>
       </label>
@@ -237,14 +379,14 @@ export default function SyncOptionsForm() {
       <label style={toggleStyle}>
         <input
           type="checkbox"
-          checked={form.preferApiAudioFeatures}
-          onChange={(event) => setForm((current) => ({ ...current, preferApiAudioFeatures: event.target.checked }))}
+          checked={form.preferLocalAudioFeatures}
+          onChange={(event) => setForm((current) => ({ ...current, preferLocalAudioFeatures: event.target.checked }))}
           style={checkboxStyle}
         />
         <span style={{ display: "grid", gap: "0.25rem" }}>
-          <span style={labelStyle}>Prefer API audio features when available</span>
+          <span style={labelStyle}>Prefer local Audio Features over API Audio Features</span>
           <span style={hintStyle}>
-            Keep provider-supplied fields and use Essentia only to fill missing values.
+            Use local Essentia values as the effective value when both API and local data exist.
           </span>
         </span>
       </label>
@@ -259,7 +401,7 @@ export default function SyncOptionsForm() {
         <span style={{ display: "grid", gap: "0.25rem" }}>
           <span style={labelStyle}>Allow estimated mood and acousticness</span>
           <span style={hintStyle}>
-            Mood, acousticness, and danceability are descriptor-based estimates unless a trained API value exists.
+            Mood, danceability, and acousticness can use clearly marked local_heuristic estimated values.
           </span>
         </span>
       </label>
@@ -267,14 +409,14 @@ export default function SyncOptionsForm() {
       <label style={toggleStyle}>
         <input
           type="checkbox"
-          checked={form.reprocessLocalAudioFeatures}
-          onChange={(event) => setForm((current) => ({ ...current, reprocessLocalAudioFeatures: event.target.checked }))}
+          checked={form.reprocessApiAudioFeaturesWithLocal}
+          onChange={(event) => setForm((current) => ({ ...current, reprocessApiAudioFeaturesWithLocal: event.target.checked }))}
           style={checkboxStyle}
         />
         <span style={{ display: "grid", gap: "0.25rem" }}>
-          <span style={labelStyle}>Reprocess local audio features</span>
+          <span style={labelStyle}>Reprocess existing API Audio Features with local Essentia</span>
           <span style={hintStyle}>
-            Re-run Essentia for local, partial, and failed local audio-feature rows on the next audio-feature sync.
+            Queue local analysis even for tracks that already have API audio-feature data.
           </span>
         </span>
       </label>
@@ -297,6 +439,7 @@ export default function SyncOptionsForm() {
           Windows analyzes 30s-90s, middle 60s, and last third 60s. Whole track analyzes the entire song and may be slower.
         </span>
       </label>
+      </div>
 
       <label style={toggleStyle}>
         <input
@@ -372,6 +515,27 @@ const hintStyle = {
   color: "var(--text-muted)",
   fontSize: "0.75rem",
   lineHeight: 1.35,
+};
+
+const sectionGroupStyle = {
+  border: "1px solid var(--border-subtle)",
+  borderRadius: "var(--radius-md)",
+  display: "grid",
+  gap: "0.85rem",
+  padding: "1rem",
+};
+
+const sectionTitleStyle = {
+  color: "var(--text-primary)",
+  fontSize: "1rem",
+  margin: "0 0 0.35rem 0",
+};
+
+const sectionCopyStyle = {
+  color: "var(--text-muted)",
+  fontSize: "0.8rem",
+  lineHeight: 1.4,
+  margin: 0,
 };
 
 const inputStyle = {

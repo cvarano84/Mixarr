@@ -10,6 +10,7 @@ const requestSchema = z.object({
   filter: z.string().optional(),
   libraryId: z.string().uuid().optional(),
   force: z.boolean().default(false),
+  providerMode: z.enum(["configured", "api_only", "local_only", "force_local"]).default("configured"),
 }).refine((body) => (body.trackIds?.length || 0) > 0 || !!body.filter, {
   message: "Provide trackIds or a filter",
 });
@@ -23,7 +24,7 @@ export async function POST(request: Request) {
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message || "Invalid retry request" }, { status: 400 });
     }
-    const { trackIds, filter, libraryId, force } = parsed.data;
+    const { trackIds, filter, libraryId, force, providerMode } = parsed.data;
     if (!trackIds?.length && !isAudioFeatureHealthFilter(filter)) {
       return NextResponse.json({ error: "A valid audio-feature health filter is required" }, { status: 400 });
     }
@@ -38,7 +39,7 @@ export async function POST(request: Request) {
           library: { ...(libraryId ? { id: libraryId } : {}), server: { userId } },
         },
         targetWhere,
-        ...(force ? [] : [missingAudioFeatureTrackWhere()]),
+        ...(force || providerMode === "force_local" ? [] : [missingAudioFeatureTrackWhere()]),
       ],
     };
     const matching = await prisma.track.findMany({
@@ -52,17 +53,6 @@ export async function POST(request: Request) {
       await prisma.audioFeature.updateMany({
         where: { trackId: { in: chunk } },
         data: {
-          ...(force ? {
-            energy: null,
-            valence: null,
-            danceability: null,
-            acousticness: null,
-            tempo: null,
-            energySource: null,
-            valenceSource: null,
-            danceabilitySource: null,
-            acousticnessSource: null,
-          } : {}),
           audioFeatureStatus: "pending",
           audioFeatureFailureReason: null,
           audioFeatureAnalyzedAt: null,
@@ -75,7 +65,7 @@ export async function POST(request: Request) {
     } else {
       console.log(`[LibraryHealth] Queued audio-feature retry for filter ${filter || "selected_tracks"}: ${matching.length} tracks`);
     }
-    return NextResponse.json({ queued: matching.length, trackIds: ids });
+    return NextResponse.json({ queued: matching.length, trackIds: ids, providerMode });
   } catch (error) {
     console.error("[LibraryHealth] Failed to queue audio-feature retry", error);
     return NextResponse.json({ error: "Failed to queue audio-feature retry" }, { status: 500 });

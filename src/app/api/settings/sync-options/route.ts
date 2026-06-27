@@ -19,6 +19,15 @@ const syncSettingsSelect = {
   tagBatchSize: true,
   bpmBatchSize: true,
   bpmReprocessNoDataFailed: true,
+  enableApiBpm: true,
+  enableLocalBpm: true,
+  preferLocalBpm: true,
+  reprocessApiBpmWithLocal: true,
+  localBpmAnalysisScope: true,
+  enableApiAudioFeatures: true,
+  enableLocalAudioFeatures: true,
+  preferLocalAudioFeatures: true,
+  reprocessApiAudioFeaturesWithLocal: true,
   enableLocalAudioFeatureFallback: true,
   preferApiAudioFeatures: true,
   allowEstimatedMoodAcousticness: true,
@@ -72,7 +81,7 @@ export async function PUT(req: Request) {
     ...Object.fromEntries(
       stringSyncSettingKeys.map((key) => [
         key,
-        key === "localAudioFeaturesScope"
+        key === "localAudioFeaturesScope" || key === "localBpmAnalysisScope"
           ? normalizeOptionalString(body[key], ["windows", "whole_track"])
           : null,
       ])

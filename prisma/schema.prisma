@@ -35,6 +35,15 @@ model SyncSettings {
   tagBatchSize          Int?
   bpmBatchSize          Int?
   bpmReprocessNoDataFailed Boolean?
+  enableApiBpm         Boolean?
+  enableLocalBpm       Boolean?
+  preferLocalBpm       Boolean?
+  reprocessApiBpmWithLocal Boolean?
+  localBpmAnalysisScope String?
+  enableApiAudioFeatures Boolean?
+  enableLocalAudioFeatures Boolean?
+  preferLocalAudioFeatures Boolean?
+  reprocessApiAudioFeaturesWithLocal Boolean?
   enableLocalAudioFeatureFallback Boolean?
   preferApiAudioFeatures Boolean?
   allowEstimatedMoodAcousticness Boolean?
@@ -171,10 +180,14 @@ model Track {
   popularityAttemptedAt DateTime?
   popularityFailureReason String?
   bpm        Float?
+  apiBpm     Float?
+  localBpm   Float?
+  effectiveBpm Float?
   bpmSource  String?
   bpmConfidence Float?
   bpmAnalyzedAt DateTime?
   bpmAnalysisStatus String?
+  bpmAnalysisScope String?
   bpmFailureReason String?
   plexLibraryId String?
   syncStatus String @default("active")
@@ -226,6 +239,20 @@ model AudioFeature {
   valence      Float?
   danceability Float?
   acousticness Float?
+  apiEnergy       Float?
+  apiMood         Float?
+  apiDanceability Float?
+  apiAcousticness Float?
+  apiLoudness     Float?
+  localEnergy       Float?
+  localMood         Float?
+  localDanceability Float?
+  localAcousticness Float?
+  localLoudness     Float?
+  effectiveEnergy       Float?
+  effectiveMood         Float?
+  effectiveDanceability Float?
+  effectiveAcousticness Float?
   tempo        Float?
   loudness     Float?
   dynamicComplexity Float?

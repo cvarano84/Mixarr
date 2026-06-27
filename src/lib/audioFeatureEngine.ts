@@ -6,6 +6,7 @@ import { isRateLimitError } from "./providers/rateLimit";
 import {
   resolveDelayMs,
   resolveLimit,
+  logMetadataProviderSettings,
   resolveRateLimitBackoff,
   type SyncEngineOptions,
 } from "./syncSettings";
@@ -39,11 +40,53 @@ function hasRealFeaturePayload(features: any) {
 }
 
 function featureStatus(data: Record<string, unknown>) {
-  const required = ["energy", "valence", "danceability", "tempo"];
+  const required = ["energy", "valence", "danceability", "acousticness", "tempo"];
   const present = required.filter((field) => data[field] !== null && data[field] !== undefined).length;
   if (present === required.length) return "success";
   if (present > 0) return "partial";
   return "no_data";
+}
+
+function firstNumber(...values: unknown[]) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number)) return number;
+  }
+  return null;
+}
+
+function effectiveAudioFeatureData(existing: any, api: {
+  energy: number | null;
+  valence: number | null;
+  danceability: number | null;
+  acousticness: number | null;
+  loudness: number | null;
+}, preferLocal: boolean, allowEstimated: boolean) {
+  const localMood = allowEstimated ? existing?.localMood ?? null : null;
+  const localDanceability = allowEstimated ? existing?.localDanceability ?? null : null;
+  const localAcousticness = allowEstimated ? existing?.localAcousticness ?? null : null;
+  const effective = preferLocal
+    ? {
+      energy: firstNumber(existing?.localEnergy, api.energy),
+      valence: firstNumber(localMood, api.valence),
+      danceability: firstNumber(localDanceability, api.danceability),
+      acousticness: firstNumber(localAcousticness, api.acousticness),
+      loudness: firstNumber(existing?.localLoudness, api.loudness),
+    }
+    : {
+      energy: firstNumber(api.energy, existing?.localEnergy),
+      valence: firstNumber(api.valence, localMood),
+      danceability: firstNumber(api.danceability, localDanceability),
+      acousticness: firstNumber(api.acousticness, localAcousticness),
+      loudness: firstNumber(api.loudness, existing?.localLoudness),
+    };
+
+  return {
+    ...effective,
+    source: api.energy !== null || api.valence !== null || api.danceability !== null || api.acousticness !== null
+      ? existing?.localEnergy !== null && existing?.localEnergy !== undefined ? "mixed" : "api"
+      : existing?.audioFeatureSource || null,
+  };
 }
 
 // One batch of audio-feature enrichment. The scheduler uses attempted=0
@@ -54,6 +97,11 @@ export const runAudioFeatureEngine = async (options: SyncEngineOptions = {}): Pr
   let summary: EnrichmentRunSummary = { attempted: 0, processed: 0, skipped: 0, failed: 0 };
 
   try {
+    const metadataSettings = logMetadataProviderSettings(options).audioFeatures;
+    if (!metadataSettings.api) {
+      console.log("[AudioFeatureEngine] API audio features disabled; using local Essentia.");
+      return summary;
+    }
     const batchSize = resolveLimit(options.audioFeatureBatchSize, "AUDIO_FEATURE_BATCH_SIZE");
     const providerDelayMs = resolveDelayMs(options.providerDelayMs, 250);
     const rateLimitBackoffEnabled = resolveRateLimitBackoff(options.rateLimitBackoffEnabled);
@@ -87,6 +135,7 @@ export const runAudioFeatureEngine = async (options: SyncEngineOptions = {}): Pr
         ratingKey: true,
         libraryId: true,
         artist: { select: { title: true } },
+        audioFeature: true,
       },
       ...(batchSize ? { take: batchSize } : {}),
       process: async (track) => {
@@ -141,25 +190,44 @@ export const runAudioFeatureEngine = async (options: SyncEngineOptions = {}): Pr
           const finalDanceability = features?.danceability ?? null;
           const finalAcousticness = features?.acousticness ?? null;
           const finalTempo = bpm ?? features?.tempo ?? null;
+          const finalLoudness = features?.loudness ?? null;
           const source = sanitizeRequiredMetadataString(features?.source || (bpm ? "Deezer BPM only" : "estimated"), { entity: "AudioFeature", entityId: track.id, field: "source" });
           const tempoSource = sanitizeRequiredMetadataString(bpm ? "Deezer" : (features ? features.source : "estimated"), { entity: "AudioFeature", entityId: track.id, field: "tempoSource" });
           const confidence = features?.source === "Spotify Audio Features" ? 0.95 : (features ? 0.65 : 0.35);
           const tempoConfidence = bpm ? 0.9 : (features ? 0.45 : 0.2);
-          const data = {
+          const effective = effectiveAudioFeatureData(track.audioFeature, {
             energy: finalEnergy,
             valence: finalValence,
             danceability: finalDanceability,
             acousticness: finalAcousticness,
+            loudness: finalLoudness,
+          }, metadataSettings.preferLocal, metadataSettings.allowEstimated);
+          const data = {
+            apiEnergy: finalEnergy,
+            apiMood: finalValence,
+            apiDanceability: finalDanceability,
+            apiAcousticness: finalAcousticness,
+            apiLoudness: finalLoudness,
+            energy: effective.energy,
+            valence: effective.valence,
+            danceability: effective.danceability,
+            acousticness: effective.acousticness,
+            effectiveEnergy: effective.energy,
+            effectiveMood: effective.valence,
+            effectiveDanceability: effective.danceability,
+            effectiveAcousticness: effective.acousticness,
             tempo: finalTempo,
+            loudness: effective.loudness,
             source,
             confidence,
             tempoSource,
             tempoConfidence,
-            audioFeatureSource: features ? "api" : null,
+            audioFeatureSource: features ? effective.source : track.audioFeature?.audioFeatureSource ?? null,
             audioFeatureStatus: featureStatus({
-              energy: finalEnergy,
-              valence: finalValence,
-              danceability: finalDanceability,
+              energy: effective.energy,
+              valence: effective.valence,
+              danceability: effective.danceability,
+              acousticness: effective.acousticness,
               tempo: finalTempo,
             }),
             audioFeatureConfidence: confidence,
@@ -171,6 +239,10 @@ export const runAudioFeatureEngine = async (options: SyncEngineOptions = {}): Pr
             acousticnessSource: finalAcousticness !== null ? "api" : null,
             lastUpdated: new Date(),
           };
+          data.energySource = effective.energy !== null && effective.energy === finalEnergy ? "api" : effective.energy !== null && effective.energy === track.audioFeature?.localEnergy ? "local_essentia" : data.energySource;
+          data.valenceSource = effective.valence !== null && effective.valence === finalValence ? "api" : effective.valence !== null && effective.valence === track.audioFeature?.localMood ? "local_heuristic" : data.valenceSource;
+          data.danceabilitySource = effective.danceability !== null && effective.danceability === finalDanceability ? "api" : effective.danceability !== null && effective.danceability === track.audioFeature?.localDanceability ? "local_heuristic" : data.danceabilitySource;
+          data.acousticnessSource = effective.acousticness !== null && effective.acousticness === finalAcousticness ? "api" : effective.acousticness !== null && effective.acousticness === track.audioFeature?.localAcousticness ? "local_heuristic" : data.acousticnessSource;
 
           await prisma.audioFeature.upsert({
             where: { trackId: track.id },

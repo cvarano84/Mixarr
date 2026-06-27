@@ -45,6 +45,7 @@ export function completeAudioFeatureWhere(): Prisma.AudioFeatureWhereInput {
       { energy: { not: null } },
       { valence: { not: null } },
       { danceability: { not: null } },
+      { acousticness: { not: null } },
       { tempo: { not: null } },
       { NOT: placeholderAudioFeatureWhere },
       {
@@ -79,6 +80,10 @@ export function apiAudioFeatureTrackWhere(): Prisma.TrackWhereInput {
           {
             OR: [
               { audioFeatureSource: "api" },
+              { apiEnergy: { not: null } },
+              { apiMood: { not: null } },
+              { apiDanceability: { not: null } },
+              { apiAcousticness: { not: null } },
               {
                 AND: [
                   { audioFeatureSource: null },
@@ -99,7 +104,15 @@ export function localAudioFeatureTrackWhere(): Prisma.TrackWhereInput {
       is: {
         AND: [
           completeAudioFeatureWhere(),
-          { audioFeatureSource: { in: ["local_essentia", "mixed"] } },
+          {
+            OR: [
+              { localEnergy: { not: null } },
+              { localMood: { not: null } },
+              { localDanceability: { not: null } },
+              { localAcousticness: { not: null } },
+              { audioFeatureSource: { in: ["local_essentia", "mixed"] } },
+            ],
+          },
         ],
       },
     },
@@ -115,6 +128,9 @@ export function heuristicAudioFeatureTrackWhere(): Prisma.TrackWhereInput {
           { valenceSource: "local_heuristic" },
           { acousticnessSource: "local_heuristic" },
           { danceabilitySource: "local_heuristic" },
+          { localMood: { not: null } },
+          { localDanceability: { not: null } },
+          { localAcousticness: { not: null } },
         ],
       },
     },
