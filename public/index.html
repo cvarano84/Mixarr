@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PlexMix</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar" aria-label="Primary">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">♪</div>
+          <div>
+            <strong>PlexMix</strong>
+            <span>Playlist Builder</span>
+          </div>
+        </div>
+        <nav class="side-nav">
+          <a class="active" href="#dashboard" data-route="dashboard"><span>O</span>Dashboard</a>
+          <a href="#library" data-route="library"><span>||</span>Library</a>
+          <a href="#builder" data-route="builder"><span>*</span>Build Playlist</a>
+          <a href="#playlist" data-route="playlist"><span>=</span>Playlist</a>
+          <a href="#settings" data-route="settings"><span>@</span>Settings</a>
+        </nav>
+      </aside>
+
+      <section class="main-view">
+        <section class="page active" data-page="dashboard">
+          <header class="hero">
+            <div>
+              <h1>Dashboard</h1>
+              <p>Your music at a glance</p>
+            </div>
+            <div class="status-pill" id="connectionStatus">Disconnected</div>
+          </header>
+
+          <section class="quick-grid" aria-label="Dashboard actions">
+            <a class="quick-card feature-card" href="#builder">
+              <span class="quick-icon purple">*</span>
+              <strong>Build Playlist</strong>
+              <small>Create a smart playlist with filters</small>
+            </a>
+            <a class="quick-card" href="#library">
+              <span class="quick-icon blue">||</span>
+              <strong>Browse Library</strong>
+              <small id="libraryCardText">Connect your Plex music library</small>
+            </a>
+            <a class="quick-card" href="#playlist">
+              <span class="quick-icon gold">=</span>
+              <strong>My Playlist</strong>
+              <small id="playlistCardText">No playlist created yet</small>
+            </a>
+          </section>
+        </section>
+
+        <section class="page" data-page="library">
+          <header class="page-header">
+            <h1>Library</h1>
+            <p>Connect a Plex music library and sync track metadata.</p>
+          </header>
+
+          <section class="panel sync-panel" aria-labelledby="syncTitle">
+            <div class="panel-heading">
+              <div>
+                <h2 id="syncTitle">Library Sync</h2>
+                <p>Pull track, genre, decade, and play-count data from Plex.</p>
+              </div>
+              <button id="syncButton" type="button" disabled>Start Sync</button>
+            </div>
+            <div class="form-stack">
+              <label>
+                <span>Music library</span>
+                <select id="librarySelect" disabled>
+                  <option value="">Connect to load libraries</option>
+                </select>
+              </label>
+              <div class="progress-wrap" aria-live="polite">
+                <div class="progress-info">
+                  <span id="syncMessage">Waiting for connection</span>
+                  <strong id="syncPercent">0%</strong>
+                </div>
+                <div class="progress-track">
+                  <div class="progress-bar" id="progressBar"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section class="page" data-page="builder">
+          <header class="page-header">
+            <h1>Build Playlist</h1>
+            <p>Shape a custom playlist with filters and popularity signals.</p>
+          </header>
+
+          <section class="builder-grid">
+            <section class="panel filters-panel" aria-labelledby="filtersTitle">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="filtersTitle">Filters</h2>
+                  <p>Combine genres, decades, and play-count limits.</p>
+                </div>
+              </div>
+              <div class="form-stack">
+                <label>
+                  <span>Playlist name</span>
+                  <input id="playlistName" type="text" value="Custom Plex Mix">
+                </label>
+                <div class="split-fields">
+                  <label>
+                    <span>Genres</span>
+                    <select id="genreSelect" multiple size="7" disabled></select>
+                  </label>
+                  <label>
+                    <span>Decades</span>
+                    <select id="decadeSelect" multiple size="7" disabled></select>
+                  </label>
+                </div>
+                <div class="inline-fields">
+                  <label>
+                    <span>Minimum plays</span>
+                    <input id="minPlays" type="number" min="0" value="0">
+                  </label>
+                  <label>
+                    <span>Track limit</span>
+                    <input id="maxTracks" type="number" min="1" max="500" value="75">
+                  </label>
+                </div>
+                <label class="toggle-row">
+                  <input id="popularOnly" type="checkbox">
+                  <span>Prioritize popular tracks</span>
+                </label>
+              </div>
+            </section>
+
+            <aside class="panel provider-panel" aria-labelledby="providersTitle">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="providersTitle">Popularity Providers</h2>
+                  <p>Used when popularity sorting is enabled.</p>
+                </div>
+              </div>
+              <div class="form-stack">
+                <label>
+                  <span>Provider</span>
+                  <select id="popularityProvider">
+                    <option value="deezer">Deezer track rank</option>
+                    <option value="lastfm">Last.fm listeners</option>
+                    <option value="spotify">Spotify popularity</option>
+                  </select>
+                </label>
+                <label class="provider-credential provider-lastfm" hidden>
+                  <span>Last.fm API key</span>
+                  <input id="lastfmApiKey" type="password" placeholder="Optional if LASTFM_API_KEY is set">
+                </label>
+                <div class="provider-credential provider-spotify" hidden>
+                  <label>
+                    <span>Spotify client ID</span>
+                    <input id="spotifyClientId" type="password" placeholder="Optional if env var is set">
+                  </label>
+                  <label>
+                    <span>Spotify client secret</span>
+                    <input id="spotifyClientSecret" type="password" placeholder="Optional if env var is set">
+                  </label>
+                </div>
+                <button id="testProviderButton" type="button">Test Provider</button>
+                <div class="provider-status" id="providerStatus">No provider tested yet.</div>
+              </div>
+              <div class="action-row">
+                <button id="previewButton" type="button" disabled>Preview</button>
+                <button id="createButton" type="button" disabled>Create Playlist</button>
+              </div>
+            </aside>
+          </section>
+        </section>
+
+        <section class="page" data-page="playlist">
+          <header class="page-header">
+            <h1>Playlist</h1>
+            <p>Review the current playlist preview before sending it to Plex.</p>
+          </header>
+
+          <section class="panel results-panel" aria-labelledby="resultsTitle">
+            <div class="panel-heading results-heading">
+              <div>
+                <h2 id="resultsTitle">Playlist Preview</h2>
+                <p id="summaryText">Sync a library to see matched tracks.</p>
+              </div>
+              <div class="metric-grid">
+                <div><strong id="trackMetric">0</strong><span>tracks</span></div>
+                <div><strong id="genreMetric">0</strong><span>genres</span></div>
+                <div><strong id="decadeMetric">0</strong><span>decades</span></div>
+              </div>
+            </div>
+            <div class="table-shell">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Track</th>
+                    <th>Artist</th>
+                    <th>Album</th>
+                    <th>Year</th>
+                    <th>Plays</th>
+                    <th>Popularity</th>
+                  </tr>
+                </thead>
+                <tbody id="trackTable">
+                  <tr><td colspan="6" class="empty-state">No preview yet.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="page" data-page="settings">
+          <header class="page-header">
+            <h1>Settings</h1>
+            <p>Manage your Plex server connection for this local session.</p>
+          </header>
+
+          <section class="panel connection-panel" aria-labelledby="connectTitle">
+            <div class="panel-heading">
+              <div>
+                <h2 id="connectTitle">Connect Plex</h2>
+                <p>Enter your server details, then sync music metadata locally.</p>
+              </div>
+            </div>
+            <form id="connectForm" class="form-stack">
+              <label>
+                <span>Plex URL</span>
+                <input id="plexUrl" type="url" required placeholder="http://192.168.1.20:32400">
+              </label>
+              <label>
+                <span>Plex token</span>
+                <input id="plexToken" type="password" required placeholder="X-Plex-Token">
+              </label>
+              <button type="submit">Connect</button>
+            </form>
+          </section>
+        </section>
+      </section>
+    </main>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

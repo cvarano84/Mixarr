@@ -1,0 +1,105 @@
+import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { runSyncEngine } from "@/lib/syncEngine";
+import { getUserSyncSettings } from "@/lib/syncSettings";
+import { alreadyRunningPayload, startSyncJobInBackground } from "@/lib/syncJobRunner";
+
+export async function POST(req: Request) {
+  const cookieStore = cookies();
+  const userId = cookieStore.get("mixarr_session")?.value;
+
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const body = await req.json();
+    const { libraryId, engine = 'plex' } = body;
+    const syncSettings = await getUserSyncSettings(userId);
+    let started;
+
+    if (engine === 'initial') {
+      started = startSyncJobInBackground({
+        engine,
+        task: () => runInitialEnrichment(syncSettings),
+      });
+    } else if (engine === 'plex') {
+      if (!libraryId) return NextResponse.json({ error: "Library ID required" }, { status: 400 });
+      started = startSyncJobInBackground({
+        engine,
+        libraryId,
+        task: () => runSyncEngine(libraryId, syncSettings),
+      });
+    } else if (engine === 'popularity') {
+      started = startSyncJobInBackground({
+        engine,
+        trackedEngine: engine,
+        task: () => import('@/lib/popularityEngine').then(m => m.runPopularityEngine(syncSettings)),
+      });
+    } else if (engine === 'audio') {
+      started = startSyncJobInBackground({
+        engine,
+        trackedEngine: engine,
+        task: async () => {
+          const audio = await import('@/lib/audioFeatureEngine');
+          const apiSummary = await audio.runAudioFeatureEngine(syncSettings);
+          const local = await import('@/lib/localAudioFeatureEngine');
+          const localSummary = await local.runLocalAudioFeatureEngine(syncSettings);
+          return {
+            attempted: apiSummary.attempted + localSummary.attempted,
+            processed: apiSummary.processed + localSummary.processed,
+            skipped: apiSummary.skipped + localSummary.skipped,
+            failed: apiSummary.failed + localSummary.failed,
+          };
+        },
+      });
+    } else if (engine === 'bpm') {
+      started = startSyncJobInBackground({
+        engine,
+        trackedEngine: engine,
+        task: () => import('@/lib/localBpmEngine').then(m => m.runLocalBpmEngine(syncSettings)),
+      });
+    } else if (engine === 'tags') {
+      started = startSyncJobInBackground({
+        engine,
+        trackedEngine: engine,
+        task: () => import('@/lib/trackTagEngine').then(m => m.runTrackTagEngine(syncSettings)),
+      });
+    } else {
+      return NextResponse.json({ error: "Unknown engine" }, { status: 400 });
+    }
+
+    if (!started.started) {
+      return NextResponse.json(alreadyRunningPayload(engine, started.activeJob));
+    }
+
+    return NextResponse.json({ status: "started", message: `${engine} sync job initiated` });
+  } catch (error) {
+    console.error("Failed to start sync", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
+async function runInitialEnrichment(syncSettings: Awaited<ReturnType<typeof getUserSyncSettings>>) {
+  console.log("[InitialSync] Starting recommended enrichment sequence...");
+
+  const [
+    popularity,
+    tags,
+    audio,
+    bpm,
+  ] = await Promise.all([
+    import('@/lib/popularityEngine'),
+    import('@/lib/trackTagEngine'),
+    import('@/lib/audioFeatureEngine'),
+    import('@/lib/localBpmEngine'),
+  ]);
+
+  await popularity.runPopularityEngine(syncSettings);
+  await tags.runTrackTagEngine(syncSettings);
+  await audio.runAudioFeatureEngine(syncSettings);
+  await (await import('@/lib/localAudioFeatureEngine')).runLocalAudioFeatureEngine(syncSettings);
+  await bpm.runLocalBpmEngine(syncSettings);
+
+  console.log("[InitialSync] Recommended enrichment sequence completed.");
+}

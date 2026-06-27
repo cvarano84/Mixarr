@@ -1,0 +1,106 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: mixarr_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mixarr}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mixarrpass}
+      POSTGRES_DB: ${POSTGRES_DB:-mixarrdb}
+    volumes:
+      - mixarr_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mixarr} -d ${POSTGRES_DB:-mixarrdb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    image: ghcr.io/cvarano84/mixarr:latest
+    container_name: mixarr_app
+    restart: always
+    ports:
+      - "3030:3000"
+      # Uncomment to expose the Prometheus metrics endpoint to the host.
+      # The container-side port must match METRICS_PORT below.
+      # - "9090:9090"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-mixarr}:${POSTGRES_PASSWORD:-mixarrpass}@db:5432/${POSTGRES_DB:-mixarrdb}?schema=public
+      - MIXARR_DB_JOB_CONCURRENCY=${MIXARR_DB_JOB_CONCURRENCY:-4}
+      - MIXARR_STATUS_POLL_SECONDS=${MIXARR_STATUS_POLL_SECONDS:-10}
+      - MIXARR_STATUS_IDLE_POLL_SECONDS=${MIXARR_STATUS_IDLE_POLL_SECONDS:-30}
+      - MIXARR_STATUS_CACHE_SECONDS=${MIXARR_STATUS_CACHE_SECONDS:-5}
+      - PLEX_CLIENT_IDENTIFIER=${PLEX_CLIENT_IDENTIFIER}
+      - PLEX_PRODUCT_NAME=${PLEX_PRODUCT_NAME:-Mixarr}
+      - DEFAULT_POPULARITY_PROVIDER=${DEFAULT_POPULARITY_PROVIDER:-deezer}
+      - TRACK_TAG_PROVIDER_ORDER=${TRACK_TAG_PROVIDER_ORDER:-deezer,discogs,musicbrainz,spotify,lastfm}
+      - TRACK_TAG_MAX_TAGS=${TRACK_TAG_MAX_TAGS:-8}
+      - DEEZER_TAGS_ENABLED=${DEEZER_TAGS_ENABLED:-1}
+      - DISCOGS_TAGS_ENABLED=${DISCOGS_TAGS_ENABLED:-0}
+      - DISCOGS_CONSUMER_KEY=${DISCOGS_CONSUMER_KEY}
+      - DISCOGS_CONSUMER_SECRET=${DISCOGS_CONSUMER_SECRET}
+      - DISCOGS_ACCESS_TOKEN=${DISCOGS_ACCESS_TOKEN}
+      - DISCOGS_ACCESS_TOKEN_SECRET=${DISCOGS_ACCESS_TOKEN_SECRET}
+      - DISCOGS_USER_AGENT=${DISCOGS_USER_AGENT:-Mixarr/1.0}
+      - DISCOGS_RATE_LIMIT_MS=${DISCOGS_RATE_LIMIT_MS:-1100}
+      - MUSICBRAINZ_TAGS_ENABLED=${MUSICBRAINZ_TAGS_ENABLED:-1}
+      - MUSICBRAINZ_USER_AGENT=${MUSICBRAINZ_USER_AGENT:-Mixarr/1.0}
+      - MUSICBRAINZ_MIN_REQUEST_INTERVAL_MS=${MUSICBRAINZ_MIN_REQUEST_INTERVAL_MS:-1100}
+      - LASTFM_API_KEY=${LASTFM_API_KEY}
+      - LASTFM_TAG_FALLBACK_ENABLED=${LASTFM_TAG_FALLBACK_ENABLED:-1}
+      - LASTFM_AUTOCORRECT=${LASTFM_AUTOCORRECT:-0}
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
+      - SPOTIFY_TAGS_ENABLED=${SPOTIFY_TAGS_ENABLED:-0}
+      - POPULARITY_REFRESH_DAYS=${POPULARITY_REFRESH_DAYS:-30}
+      - MAX_PLAYLIST_SIZE=${MAX_PLAYLIST_SIZE:-5000}
+      - LOCAL_BPM_ANALYZER=${LOCAL_BPM_ANALYZER:-auto}
+      - LOCAL_BPM_ANALYSIS_SCOPE=${LOCAL_BPM_ANALYSIS_SCOPE:-windows}
+      - LOCAL_BPM_SAMPLE_SECONDS=${LOCAL_BPM_SAMPLE_SECONDS:-60}
+      - LOCAL_BPM_MIN_SAMPLE_SECONDS=${LOCAL_BPM_MIN_SAMPLE_SECONDS:-10}
+      - LOCAL_BPM_MIN_SAMPLE_BYTES=${LOCAL_BPM_MIN_SAMPLE_BYTES:-65536}
+      - LOCAL_BPM_RETRY_DAYS=${LOCAL_BPM_RETRY_DAYS:-14}
+      - LOCAL_BPM_CONFIDENCE_THRESHOLD=${LOCAL_BPM_CONFIDENCE_THRESHOLD:-0.75}
+      - LOCAL_BPM_FFMPEG_PATH=${LOCAL_BPM_FFMPEG_PATH:-ffmpeg}
+      - LOCAL_BPM_FFPROBE_PATH=${LOCAL_BPM_FFPROBE_PATH:-ffprobe}
+      - LOCAL_BPM_ESSENTIA_PYTHON=${LOCAL_BPM_ESSENTIA_PYTHON:-/opt/essentia/bin/python}
+      - LOCAL_BPM_AUBIO_PATH=${LOCAL_BPM_AUBIO_PATH:-aubio}
+      - LOCAL_BPM_TEMP_DIR=${LOCAL_BPM_TEMP_DIR:-/app/tmp/mixarr-bpm}
+      - LOCAL_BPM_REPROCESS_AUBIO_WITH_ESSENTIA=${LOCAL_BPM_REPROCESS_AUBIO_WITH_ESSENTIA:-0}
+      - LOCAL_BPM_REPROCESS_NO_DATA_FAILED=${LOCAL_BPM_REPROCESS_NO_DATA_FAILED:-0}
+      - LOCAL_AUDIO_FEATURES_SCOPE=${LOCAL_AUDIO_FEATURES_SCOPE:-windows}
+      - PLEX_MEDIA_PATH_HOST=${PLEX_MEDIA_PATH_HOST:-}
+      - MIXARR_MEDIA_PATH_CONTAINER=${MIXARR_MEDIA_PATH_CONTAINER:-}
+      - MIXARR_PATH_MAPPINGS=${MIXARR_PATH_MAPPINGS:-}
+      - SYNC_CRON_SCHEDULE=${SYNC_CRON_SCHEDULE:-0 3 * * *}
+      - SYNC_MAX_PIPELINE_MS=${SYNC_MAX_PIPELINE_MS:-21600000}
+      - METRICS_PORT=${METRICS_PORT:-0}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - mixarr_app_logs:/app/logs
+      # Optional: mount Plex media read-only so LocalBpmEngine can analyze files directly.
+      # If Plex reports /mnt/Music/... but your Docker host stores it at
+      # /mnt/plex/Music/..., set MIXARR_PATH_MAPPINGS=/mnt/Music:/media and
+      # mount the real host folder at /media here:
+      # - /mnt/plex/Music:/media:ro
+
+  #grafana:                       # Uncomment to add Grafana for monitoring. If you want Mixarr metrics, be sure to set METRICS_PORT above and in .env
+  #  image: grafana/grafana:latest
+  #  container_name: grafana
+  #  ports:
+  #    - "3000:3000"
+  #  volumes:
+  #    - grafana-storage:/var/lib/grafana
+  #  environment:
+  #    - GF_SECURITY_ADMIN_PASSWORD=admin # Change this for production
+  #  restart: unless-stopped
+
+
+volumes:
+  mixarr_db_data:
+  mixarr_app_logs:
+  #grafana-storage:                 # Uncomment to enable Grafana
+  

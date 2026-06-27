@@ -1,0 +1,328 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String         @id @default(uuid())
+  plexId        Int            @unique
+  username      String
+  email         String?
+  thumb         String?
+  accessToken   String
+  defaultServerId  String?
+  defaultLibraryId String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  servers       Server[]
+  playlistRules PlaylistRule[]
+  playlistHistory PlaylistHistory[]
+  blockedTracks BlockedTrack[]
+  syncSettings  SyncSettings?
+}
+
+model SyncSettings {
+  id                    String   @id @default(uuid())
+  userId                String   @unique
+  plexPageSize          Int?
+  popularityBatchSize   Int?
+  audioFeatureBatchSize Int?
+  tagBatchSize          Int?
+  bpmBatchSize          Int?
+  bpmReprocessNoDataFailed Boolean?
+  enableLocalAudioFeatureFallback Boolean?
+  preferApiAudioFeatures Boolean?
+  allowEstimatedMoodAcousticness Boolean?
+  reprocessLocalAudioFeatures Boolean?
+  localAudioFeaturesScope String?
+  includeEstimatedAudioFeaturesInFilters Boolean?
+  audioFeatureMinimumConfidence Float?
+  providerDelayMs       Int?
+  rateLimitBackoffEnabled Boolean?
+  hardDeleteMissingAfterDays Int?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Server {
+  id                String    @id @default(uuid())
+  machineIdentifier String    @unique
+  name              String
+  uri               String
+  accessToken       String
+  userId            String
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  libraries         Library[]
+  playlistRules     PlaylistRule[]
+  playlistHistory   PlaylistHistory[]
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
+model Library {
+  id        String     @id @default(uuid())
+  plexId    String
+  serverId  String
+  name      String
+  type      String
+  server    Server     @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  artists   Artist[]
+  albums    Album[]
+  tracks    Track[]
+  syncLogs  SyncLog[]
+  playlistRules PlaylistRule[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@unique([serverId, plexId])
+}
+
+model Artist {
+  id         String   @id @default(uuid())
+  plexId     String
+  libraryId  String
+  title      String
+  summary    String?
+  thumb      String?
+  addedAt    DateTime?
+  updatedAt  DateTime?
+  viewCount  Int      @default(0)
+  lastViewedAt DateTime?
+  plexLibraryId String?
+  syncStatus String @default("active")
+  lastSeenAt DateTime?
+  lastSeenSyncId String?
+  missingSince DateTime?
+  deletedAt DateTime?
+  library    Library  @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+  albums     Album[]
+  tracks     Track[]
+  tags       Tag[]    @relation("ArtistTags")
+
+  @@unique([libraryId, plexId])
+  @@index([libraryId, syncStatus])
+  @@index([libraryId, lastSeenSyncId])
+}
+
+model Album {
+  id         String   @id @default(uuid())
+  plexId     String
+  libraryId  String
+  artistId   String
+  title      String
+  summary    String?
+  thumb      String?
+  year       Int?
+  addedAt    DateTime?
+  updatedAt  DateTime?
+  viewCount  Int      @default(0)
+  lastViewedAt DateTime?
+  plexLibraryId String?
+  syncStatus String @default("active")
+  lastSeenAt DateTime?
+  lastSeenSyncId String?
+  missingSince DateTime?
+  deletedAt DateTime?
+  library    Library  @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+  artist     Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  tracks     Track[]
+  tags       Tag[]    @relation("AlbumTags")
+
+  @@unique([libraryId, plexId])
+  @@index([libraryId, syncStatus])
+  @@index([libraryId, lastSeenSyncId])
+}
+
+model Track {
+  id         String   @id @default(uuid())
+  plexId     String
+  ratingKey  String
+  plexGuid   String?
+  mediaPath  String?
+  libraryId  String
+  albumId    String
+  artistId   String
+  title      String
+  duration   Int?
+  trackIndex Int?
+  rating     Float?
+  contentRating String?
+  normalizedTitle String?
+  isExplicit Boolean @default(false)
+  isLive     Boolean @default(false)
+  isRemaster Boolean @default(false)
+  isHoliday  Boolean @default(false)
+  isIntroOutro Boolean @default(false)
+  viewCount  Int      @default(0)
+  lastViewedAt DateTime?
+  addedAt    DateTime?
+  updatedAt  DateTime?
+  tagsSyncedAt DateTime?
+  genreStatus String?
+  genreAttemptedAt DateTime?
+  genreFailureReason String?
+  popularityStatus String?
+  popularityAttemptedAt DateTime?
+  popularityFailureReason String?
+  bpm        Float?
+  bpmSource  String?
+  bpmConfidence Float?
+  bpmAnalyzedAt DateTime?
+  bpmAnalysisStatus String?
+  bpmFailureReason String?
+  plexLibraryId String?
+  syncStatus String @default("active")
+  lastSeenAt DateTime?
+  lastSeenSyncId String?
+  missingSince DateTime?
+  deletedAt DateTime?
+  library    Library  @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+  album      Album    @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  artist     Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  tags       Tag[]    @relation("TrackTags")
+  popularity Popularity?
+  audioFeature AudioFeature?
+  blockedBy  BlockedTrack[]
+
+  @@unique([libraryId, plexId])
+  @@index([libraryId, syncStatus])
+  @@index([libraryId, lastSeenSyncId])
+  @@index([libraryId, ratingKey])
+}
+
+model Tag {
+  id       String   @id @default(uuid())
+  type     String   // genre, mood, style, country, decade
+  name     String
+  artists  Artist[] @relation("ArtistTags")
+  albums   Album[]  @relation("AlbumTags")
+  tracks   Track[]  @relation("TrackTags")
+
+  @@unique([type, name])
+}
+
+model Popularity {
+  id          String   @id @default(uuid())
+  trackId     String   @unique
+  provider    String   // deezer, lastfm, spotify
+  score       Float    // Normalized score 0-100 or 0-1M
+  confidence  Float?
+  matchedArtist String?
+  matchedTitle  String?
+  lastUpdated DateTime @default(now())
+  track       Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+}
+
+model AudioFeature {
+  id           String   @id @default(uuid())
+  trackId      String   @unique
+  energy       Float?
+  valence      Float?
+  danceability Float?
+  acousticness Float?
+  tempo        Float?
+  loudness     Float?
+  dynamicComplexity Float?
+  key          String?
+  scale        String?
+  spectralCentroid Float?
+  spectralContrast Float?
+  rhythmStability Float?
+  onsetRate    Float?
+  zeroCrossingRate Float?
+  replayGain   Float?
+  source       String?
+  confidence   Float?
+  tempoSource  String?
+  tempoConfidence Float?
+  audioFeatureSource String?
+  audioFeatureStatus String?
+  audioFeatureConfidence Float?
+  audioFeatureAnalyzedAt DateTime?
+  audioFeatureFailureReason String?
+  audioFeatureAnalysisScope String?
+  energySource String?
+  valenceSource String?
+  danceabilitySource String?
+  acousticnessSource String?
+  lastUpdated  DateTime @default(now())
+  track        Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+}
+
+model BlockedTrack {
+  id        String   @id @default(uuid())
+  userId    String
+  trackId   String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  track     Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, trackId])
+}
+
+model PlaylistRule {
+  id                String    @id @default(uuid())
+  userId            String
+  serverId          String?
+  libraryId         String?
+  name              String
+  rulesJson         String    // JSON string of builder filters
+  optionsJson       String    @default("{}")
+  limit             Int       @default(50)
+  autoRefresh       Boolean   @default(false)
+  plexPlaylistId    String?
+  lastRefreshedAt   DateTime?
+  lastRefreshStatus String?
+  lastRefreshError  String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  server            Server?   @relation(fields: [serverId], references: [id], onDelete: SetNull)
+  library           Library?  @relation(fields: [libraryId], references: [id], onDelete: SetNull)
+  history           PlaylistHistory[]
+}
+
+model PlaylistHistory {
+  id              String   @id @default(uuid())
+  userId          String
+  playlistRuleId  String?
+  serverId        String?
+  name            String
+  rulesJson       String
+  optionsJson     String   @default("{}")
+  trackCount      Int
+  plexPlaylistId  String?
+  status          String
+  error           String?
+  createdAt       DateTime @default(now())
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  playlistRule    PlaylistRule? @relation(fields: [playlistRuleId], references: [id], onDelete: SetNull)
+  server          Server?  @relation(fields: [serverId], references: [id], onDelete: SetNull)
+}
+
+model SyncLog {
+  id                     String   @id @default(uuid())
+  libraryId              String
+  status                 String   // in_progress, success, failed
+  startedAt              DateTime @default(now())
+  endedAt                DateTime?
+  reconciliationAt       DateTime?
+  snapshotComplete       Boolean  @default(false)
+  plexReportedTrackCount Int?
+  error                  String?
+  library                Library  @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+
+  @@index([libraryId, startedAt])
+}
+
+model SystemState {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}

@@ -1,0 +1,183 @@
+import axios from "axios";
+import {
+  providerRequestDurationSeconds,
+  providerRequestsTotal,
+} from "../metrics";
+import {
+  RateLimitError,
+  createCooldown,
+  createThrottle,
+  parseRetryAfterMs,
+} from "./rateLimit";
+
+const PROVIDER = "discogs";
+
+type Outcome = "success" | "not_found" | "timeout" | "rate_limited" | "error";
+
+function classifyError(error: any): "timeout" | "rate_limited" | "error" {
+  if (error?.code === "ECONNABORTED") return "timeout";
+  if (error?.response?.status === 429) return "rate_limited";
+  return "error";
+}
+
+// Discogs publishes a 60 req/min authenticated cap (25/min anonymous). The
+// default 1100ms spacing is the same value the design doc called for: ~55
+// req/min, just under the cap with headroom for clock skew and parallel
+// requests within a single track lookup. Configurable via env for ops
+// flexibility.
+function getMinIntervalMs() {
+  const configured = Number(process.env.DISCOGS_RATE_LIMIT_MS || 1100);
+  return Number.isFinite(configured) && configured >= 0 ? configured : 1100;
+}
+
+// One throttle and one cooldown per process, shared across every call into
+// this module. Module-level so concurrent enrichment batches don't blow the
+// per-token rate limit by each maintaining their own counter.
+const discogsThrottle = createThrottle({ minIntervalMs: getMinIntervalMs() });
+const discogsCooldown = createCooldown({ provider: PROVIDER, defaultCooldownMs: 60_000 });
+
+function envEnabled(name: string, defaultValue: boolean) {
+  const value = process.env[name]?.toLowerCase();
+  if (!value) return defaultValue;
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
+function getDiscogsConsumerCredentials() {
+  return {
+    key: (process.env.DISCOGS_CONSUMER_KEY || "").trim(),
+    secret: (process.env.DISCOGS_CONSUMER_SECRET || "").trim(),
+  };
+}
+
+function getDiscogsOAuthAccessCredentials() {
+  return {
+    token: (process.env.DISCOGS_ACCESS_TOKEN || "").trim(),
+    tokenSecret: (process.env.DISCOGS_ACCESS_TOKEN_SECRET || "").trim(),
+  };
+}
+
+export const isDiscogsTagLookupEnabled = () => {
+  const consumer = getDiscogsConsumerCredentials();
+  return envEnabled("DISCOGS_TAGS_ENABLED", false) &&
+    Boolean(consumer.key) &&
+    Boolean(consumer.secret);
+};
+
+function getDiscogsUserAgent() {
+  return (process.env.DISCOGS_USER_AGENT || "Mixarr/1.0").trim();
+}
+
+function oauthEncode(value: string) {
+  return encodeURIComponent(value)
+    .replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+function getOAuthNonce() {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID().replace(/-/g, "");
+  }
+
+  if (globalThis.crypto?.getRandomValues) {
+    const bytes = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  return `${Date.now()}${Math.random().toString(16).slice(2)}`;
+}
+
+function buildDiscogsAuthorizationHeader() {
+  const consumer = getDiscogsConsumerCredentials();
+  const access = getDiscogsOAuthAccessCredentials();
+
+  if (!consumer.key || !consumer.secret) return "";
+
+  if (access.token && access.tokenSecret) {
+    const oauthParams: Record<string, string> = {
+      oauth_consumer_key: consumer.key,
+      oauth_nonce: getOAuthNonce(),
+      oauth_signature: `${consumer.secret}&${access.tokenSecret}`,
+      oauth_signature_method: "PLAINTEXT",
+      oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
+      oauth_token: access.token,
+    };
+
+    return `OAuth ${Object.entries(oauthParams)
+      .map(([key, value]) => `${oauthEncode(key)}="${oauthEncode(value)}"`)
+      .join(", ")}`;
+  }
+
+  return `Discogs key=${consumer.key}, secret=${consumer.secret}`;
+}
+
+function collectResultTags(results: any[]) {
+  const tags: string[] = [];
+
+  for (const result of results) {
+    if (Array.isArray(result?.style)) tags.push(...result.style);
+    if (Array.isArray(result?.genre)) tags.push(...result.genre);
+  }
+
+  return tags;
+}
+
+export const getDiscogsTrackTags = async (artist: string, track: string): Promise<string[]> => {
+  if (!isDiscogsTagLookupEnabled()) return [];
+
+  const endTimer = providerRequestDurationSeconds.startTimer({ provider: PROVIDER });
+  let result: Outcome = "success";
+
+  try {
+    // Short-circuit if we're still inside a previously-triggered cooldown
+    // window. Avoids burning the next minute's budget on doomed requests
+    // and lets the router halt the per-track provider chain immediately.
+    discogsCooldown.check();
+
+    const searches = [
+      { q: track, artist, type: "release" },
+      { q: `${artist} ${track}`, type: "release" },
+      { q: `${artist} ${track}`, type: "master" },
+    ];
+
+    for (const params of searches) {
+      await discogsThrottle();
+      const response = await axios.get("https://api.discogs.com/database/search", {
+        params: {
+          ...params,
+          per_page: 5,
+        },
+        headers: {
+          Authorization: buildDiscogsAuthorizationHeader(),
+          "User-Agent": getDiscogsUserAgent(),
+        },
+        timeout: 10000,
+      });
+
+      const tags = collectResultTags(response.data?.results || []);
+      if (tags.length > 0) return tags;
+    }
+
+    result = "not_found";
+    return [];
+  } catch (error: any) {
+    // Cooldown-throw path: already a RateLimitError, no network round-trip
+    // happened. Re-throw without re-logging or re-triggering the cooldown.
+    if (error instanceof RateLimitError) {
+      result = "rate_limited";
+      throw error;
+    }
+
+    result = classifyError(error);
+    const reason = error?.code === "ECONNABORTED" ? "timeout" : (error?.code || error?.message || "error");
+    console.error(`[Discogs] Tags fetch failed for ${artist} - ${track} (${reason})`);
+    if (result === "rate_limited") {
+      const retryAfterMs = parseRetryAfterMs(error?.response?.headers?.["retry-after"]);
+      discogsCooldown.trigger(retryAfterMs);
+      throw new RateLimitError(PROVIDER, retryAfterMs);
+    }
+    return [];
+  } finally {
+    endTimer();
+    providerRequestsTotal.inc({ provider: PROVIDER, result });
+  }
+};
