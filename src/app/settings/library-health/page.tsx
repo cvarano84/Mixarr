@@ -26,6 +26,7 @@ type HealthLibrary = {
   bpmFailed: number;
   bpmExtractionFailed: number;
   bpmAnalyzerFailed: number;
+  bpmTooShort: number;
   bpmPendingBackfill: number;
   audioFeaturesComplete: number;
   audioFeaturesMissing: number;
@@ -37,6 +38,7 @@ type HealthLibrary = {
   audioFeaturesFailed: number;
   audioFeaturesExtractionFailed: number;
   audioFeaturesAnalyzerFailed: number;
+  audioFeaturesTooShort: number;
   bpmProviderMode: string;
   audioFeatureProviderMode: string;
   tracksWithGenres: number;
@@ -73,8 +75,8 @@ type MissingTrack = {
   album: { title: string };
 };
 
-type BpmFilter = "tracks_with_bpm" | "api_bpm" | "local_bpm" | "imported_bpm" | "missing_bpm" | "bpm_no_data" | "bpm_failed" | "extraction_failed" | "analyzer_failed" | "pending_backfill" | "pending_bpm";
-type AudioFilter = "missing_audio_features" | "api_audio_features" | "local_audio_features" | "heuristic_audio_features" | "partial_audio_features" | "audio_feature_no_data" | "audio_feature_failed" | "extraction_failed" | "analyzer_failed" | "pending_audio_features";
+type BpmFilter = "tracks_with_bpm" | "api_bpm" | "local_bpm" | "imported_bpm" | "missing_bpm" | "bpm_no_data" | "bpm_failed" | "extraction_failed" | "analyzer_failed" | "too_short" | "pending_backfill" | "pending_bpm";
+type AudioFilter = "missing_audio_features" | "api_audio_features" | "local_audio_features" | "heuristic_audio_features" | "partial_audio_features" | "audio_feature_no_data" | "audio_feature_failed" | "extraction_failed" | "analyzer_failed" | "too_short" | "pending_audio_features";
 type RetryProviderMode = "configured" | "api_only" | "local_only" | "force_local";
 type MetadataSection = "genres" | "popularity";
 type GenreFilter = "tracks_with_genres" | "missing_genres" | "genre_no_data" | "genre_failed" | "pending_genre_backfill";
@@ -171,7 +173,7 @@ function formatDate(value: string | null) {
 }
 
 function labelBpm(status: string) {
-  return ({ success: "BPM available", with_bpm: "BPM available", no_data: "No data", failed: "Failed", extraction_failed: "Extraction failed", analyzer_failed: "Analyzer failed", pending: "Pending" } as Record<string, string>)[status] || status;
+  return ({ success: "BPM available", with_bpm: "BPM available", no_data: "No data", failed: "Failed", extraction_failed: "Extraction failed", analyzer_failed: "Analyzer failed", too_short: "Too short", pending: "Pending" } as Record<string, string>)[status] || status;
 }
 
 const bpmFilterLabels: Record<BpmFilter, string> = {
@@ -184,6 +186,7 @@ const bpmFilterLabels: Record<BpmFilter, string> = {
   bpm_failed: "BPM failed",
   extraction_failed: "Extraction failed",
   analyzer_failed: "Analyzer failed",
+  too_short: "BPM too short",
   pending_backfill: "Pending backfill",
   pending_bpm: "Pending BPM",
 };
@@ -198,6 +201,7 @@ const bpmEmptyMessages: Record<BpmFilter, string> = {
   bpm_failed: "No active tracks have a terminal BPM failure.",
   extraction_failed: "No active tracks have an extraction failure.",
   analyzer_failed: "No active tracks have an analyzer failure.",
+  too_short: "No active tracks are below the local BPM minimum duration.",
   pending_backfill: "No active tracks are waiting for BPM backfill.",
   pending_bpm: "No active tracks are waiting for BPM backfill.",
 };
@@ -212,6 +216,7 @@ const audioFilterLabels: Record<AudioFilter, string> = {
   audio_feature_failed: "Audio failed",
   extraction_failed: "Extraction failed",
   analyzer_failed: "Analyzer failed",
+  too_short: "Audio feature too short",
   pending_audio_features: "Pending audio features",
 };
 
@@ -225,6 +230,7 @@ const audioEmptyMessages: Record<AudioFilter, string> = {
   audio_feature_failed: "No active tracks have terminal audio-feature failures.",
   extraction_failed: "No active tracks have audio extraction failures.",
   analyzer_failed: "No active tracks have Essentia analyzer failures.",
+  too_short: "No active tracks are below the local audio-feature minimum duration.",
   pending_audio_features: "No active tracks are waiting for audio-feature backfill.",
 };
 
@@ -771,6 +777,7 @@ export default function LibraryHealthPage() {
                 ["bpm_failed", library.bpmFailed],
                 ["extraction_failed", library.bpmExtractionFailed],
                 ["analyzer_failed", library.bpmAnalyzerFailed],
+                ["too_short", library.bpmTooShort],
                 ["pending_bpm", library.bpmPendingBackfill],
               ] as [BpmFilter, number][]).map(([filter, count]) => (
                 <button
@@ -798,6 +805,7 @@ export default function LibraryHealthPage() {
                 ["audio_feature_failed", library.audioFeaturesFailed],
                 ["extraction_failed", library.audioFeaturesExtractionFailed],
                 ["analyzer_failed", library.audioFeaturesAnalyzerFailed],
+                ["too_short", library.audioFeaturesTooShort],
                 ["pending_audio_features", library.audioFeaturesMissing],
               ] as [AudioFilter, number][]).map(([filter, count]) => (
                 <button
@@ -1108,7 +1116,7 @@ export default function LibraryHealthPage() {
           <label><span>Artist</span><input value={filters.artist} onChange={(e) => setFilters({ ...filters, artist: e.target.value })} /></label>
           <label><span>Album</span><input value={filters.album} onChange={(e) => setFilters({ ...filters, album: e.target.value })} /></label>
           <label><span>Missing since</span><input type="date" value={filters.missingSinceFrom} onChange={(e) => setFilters({ ...filters, missingSinceFrom: e.target.value })} /></label>
-          <label><span>BPM status</span><select value={filters.bpmStatus} onChange={(e) => setFilters({ ...filters, bpmStatus: e.target.value })}><option value="">All statuses</option><option value="with_bpm">BPM available</option><option value="pending">Pending</option><option value="no_data">No data</option><option value="failed">Legacy failure</option><option value="extraction_failed">Extraction failed</option><option value="analyzer_failed">Analyzer failed</option></select></label>
+          <label><span>BPM status</span><select value={filters.bpmStatus} onChange={(e) => setFilters({ ...filters, bpmStatus: e.target.value })}><option value="">All statuses</option><option value="with_bpm">BPM available</option><option value="pending">Pending</option><option value="no_data">No data</option><option value="failed">Legacy failure</option><option value="extraction_failed">Extraction failed</option><option value="analyzer_failed">Analyzer failed</option><option value="too_short">Too short</option></select></label>
           <button className={styles.primaryButton} type="submit">Apply filters</button>
           <button className={styles.secondaryButton} type="button" onClick={() => { setFilters(initialFilters); setAppliedFilters(initialFilters); setPage(1); void loadMissing(initialFilters, 1); }}>Reset</button>
         </form>

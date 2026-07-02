@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
-import { missingAudioFeatureTrackWhere } from "@/lib/audioFeatures";
+import { audioFeatureTooShortTrackWhere, missingAudioFeatureTrackWhere } from "@/lib/audioFeatures";
 import { audioFeatureHealthFilterWhere, isAudioFeatureHealthFilter } from "@/lib/libraryHealth";
 
 const requestSchema = z.object({
@@ -40,6 +40,7 @@ export async function POST(request: Request) {
         },
         targetWhere,
         ...(force || providerMode === "force_local" ? [] : [missingAudioFeatureTrackWhere()]),
+        ...(force || providerMode === "force_local" ? [] : [{ NOT: audioFeatureTooShortTrackWhere() }]),
       ],
     };
     const matching = await prisma.track.findMany({

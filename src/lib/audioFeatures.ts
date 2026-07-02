@@ -9,6 +9,7 @@ export const audioFeatureStatuses = [
   "no_data",
   "extraction_failed",
   "analyzer_failed",
+  "too_short",
   "partial",
 ] as const;
 export type AudioFeatureStatus = typeof audioFeatureStatuses[number];
@@ -183,6 +184,15 @@ export function audioFeatureAnalyzerFailedTrackWhere(): Prisma.TrackWhereInput {
     AND: [
       missingAudioFeatureTrackWhere(),
       { audioFeature: { is: { audioFeatureStatus: "analyzer_failed" } } },
+    ],
+  };
+}
+
+export function audioFeatureTooShortTrackWhere(): Prisma.TrackWhereInput {
+  return {
+    AND: [
+      missingAudioFeatureTrackWhere(),
+      { audioFeature: { is: { audioFeatureStatus: "too_short" } } },
     ],
   };
 }

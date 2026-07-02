@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 
-export const bpmAnalysisStatuses = ["success", "no_data", "failed", "extraction_failed", "analyzer_failed"] as const;
+export const bpmAnalysisStatuses = ["success", "no_data", "failed", "extraction_failed", "analyzer_failed", "too_short"] as const;
 export type BpmAnalysisStatus = typeof bpmAnalysisStatuses[number];
 
 export type TrackWithBpmSources = {
@@ -142,7 +142,7 @@ export function localBpmSourceTrackWhere(): Prisma.TrackWhereInput {
             OR: [
               { tempoSource: { startsWith: "Essentia" } },
               { tempoSource: { startsWith: "Aubio" } },
-              { tempoSource: { in: ["local_not_found", "local_failed", "local_extraction_failed", "local_analyzer_failed"] } },
+              { tempoSource: { in: ["local_not_found", "local_failed", "local_extraction_failed", "local_analyzer_failed", "local_too_short"] } },
             ],
           },
         },
@@ -246,6 +246,21 @@ export function bpmAnalyzerFailedMarkerTrackWhere(): Prisma.TrackWhereInput {
   };
 }
 
+export function bpmTooShortMarkerTrackWhere(): Prisma.TrackWhereInput {
+  return {
+    OR: [
+      { bpmAnalysisStatus: "too_short" },
+      {
+        audioFeature: {
+          is: {
+            tempoSource: "local_too_short",
+          },
+        },
+      },
+    ],
+  };
+}
+
 export function bpmNoDataTrackWhere(): Prisma.TrackWhereInput {
   return {
     AND: [
@@ -299,6 +314,15 @@ export function bpmAnalyzerFailedTrackWhere(): Prisma.TrackWhereInput {
   };
 }
 
+export function bpmTooShortTrackWhere(): Prisma.TrackWhereInput {
+  return {
+    AND: [
+      missingEffectiveBpmTrackWhere(),
+      bpmTooShortMarkerTrackWhere(),
+    ],
+  };
+}
+
 export function noEffectiveBpmTrackWhere(): Prisma.TrackWhereInput {
   return missingEffectiveBpmTrackWhere();
 }
@@ -317,6 +341,7 @@ export function pendingBpmBackfillTrackWhere(): Prisma.TrackWhereInput {
       { NOT: bpmFailedMarkerTrackWhere() },
       { NOT: bpmExtractionFailedMarkerTrackWhere() },
       { NOT: bpmAnalyzerFailedMarkerTrackWhere() },
+      { NOT: bpmTooShortMarkerTrackWhere() },
     ],
   };
 }

@@ -106,10 +106,12 @@ describe("library health", () => {
     assert.match(failed, /\"failed\"/);
     assert.match(failed, /extraction_failed/);
     assert.match(failed, /analyzer_failed/);
+    assert.doesNotMatch(failed, /too_short/);
 
     const pending = JSON.stringify(pendingBpmBackfillTrackWhere());
     assert.match(pending, /notIn/);
     assert.match(pending, /no_data/);
+    assert.match(pending, /too_short/);
   });
 
   it("escapes spreadsheet formulas and quotes in CSV exports", () => {
@@ -125,6 +127,7 @@ describe("library health", () => {
   it("exposes analyzer failures separately from extraction failures", () => {
     assert.equal(missingTrackBpmStatus({ bpm: null, bpmAnalysisStatus: "analyzer_failed" }), "analyzer_failed");
     assert.equal(missingTrackBpmStatus({ bpm: null, bpmAnalysisStatus: "extraction_failed" }), "extraction_failed");
+    assert.equal(missingTrackBpmStatus({ bpm: null, bpmAnalysisStatus: "too_short" }), "too_short");
   });
 
   it("serializes legacy metadata attempt markers into health statuses", () => {

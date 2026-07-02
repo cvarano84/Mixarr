@@ -6,6 +6,7 @@ import {
   audioFeatureExtractionFailedTrackWhere,
   audioFeatureFailedTrackWhere,
   audioFeatureNoDataTrackWhere,
+  audioFeatureTooShortTrackWhere,
   completeAudioFeatureTrackWhere,
   heuristicAudioFeatureTrackWhere,
   localAudioFeatureTrackWhere,
@@ -18,6 +19,7 @@ import {
   bpmExtractionFailedTrackWhere,
   bpmFailedTrackWhere,
   bpmNoDataTrackWhere,
+  bpmTooShortTrackWhere,
   effectiveBpmTrackWhere,
   getEffectiveBpm,
   importedBpmTrackWhere,
@@ -61,6 +63,7 @@ export const bpmHealthFilters = [
   "bpm_failed",
   "extraction_failed",
   "analyzer_failed",
+  "too_short",
   "pending_backfill",
   "pending_bpm",
 ] as const;
@@ -76,6 +79,7 @@ export const audioFeatureHealthFilters = [
   "audio_feature_failed",
   "extraction_failed",
   "analyzer_failed",
+  "too_short",
   "pending_audio_features",
 ] as const;
 export type AudioFeatureHealthFilter = typeof audioFeatureHealthFilters[number];
@@ -173,6 +177,7 @@ export function bpmHealthFilterWhere(filter: BpmHealthFilter): Prisma.TrackWhere
     case "bpm_failed": return bpmFailedTrackWhere();
     case "extraction_failed": return bpmExtractionFailedTrackWhere();
     case "analyzer_failed": return bpmAnalyzerFailedTrackWhere();
+    case "too_short": return bpmTooShortTrackWhere();
     case "pending_backfill": return pendingBpmBackfillTrackWhere();
     case "pending_bpm": return pendingBpmBackfillTrackWhere();
   }
@@ -189,6 +194,7 @@ export function audioFeatureHealthFilterWhere(filter: AudioFeatureHealthFilter):
     case "audio_feature_failed": return audioFeatureFailedTrackWhere();
     case "extraction_failed": return audioFeatureExtractionFailedTrackWhere();
     case "analyzer_failed": return audioFeatureAnalyzerFailedTrackWhere();
+    case "too_short": return audioFeatureTooShortTrackWhere();
     case "pending_audio_features": return missingAudioFeatureTrackWhere();
   }
 }
@@ -405,7 +411,7 @@ export async function getBpmHealthSummary(userId: string, libraryId?: string) {
     syncStatus: "active",
     library: { ...(libraryId ? { id: libraryId } : {}), server: { userId } },
   };
-  const [tracksWithBpm, apiBpm, localBpm, importedBpm, missingBpm, bpmNoData, bpmFailed, extractionFailed, analyzerFailed, pendingBackfill] = await Promise.all([
+  const [tracksWithBpm, apiBpm, localBpm, importedBpm, missingBpm, bpmNoData, bpmFailed, extractionFailed, analyzerFailed, tooShort, pendingBackfill] = await Promise.all([
     prisma.track.count({ where: { AND: [active, effectiveBpmTrackWhere()] } }),
     prisma.track.count({ where: { AND: [active, apiBpmTrackWhere()] } }),
     prisma.track.count({ where: { AND: [active, localBpmSourceTrackWhere()] } }),
@@ -415,9 +421,10 @@ export async function getBpmHealthSummary(userId: string, libraryId?: string) {
     prisma.track.count({ where: { AND: [active, bpmFailedTrackWhere()] } }),
     prisma.track.count({ where: { AND: [active, bpmExtractionFailedTrackWhere()] } }),
     prisma.track.count({ where: { AND: [active, bpmAnalyzerFailedTrackWhere()] } }),
+    prisma.track.count({ where: { AND: [active, bpmTooShortTrackWhere()] } }),
     prisma.track.count({ where: { AND: [active, pendingBpmBackfillTrackWhere()] } }),
   ]);
-  return { tracksWithBpm, apiBpm, localBpm, importedBpm, missingBpm, bpmNoData, bpmFailed, extractionFailed, analyzerFailed, pendingBackfill };
+  return { tracksWithBpm, apiBpm, localBpm, importedBpm, missingBpm, bpmNoData, bpmFailed, extractionFailed, analyzerFailed, tooShort, pendingBackfill };
 }
 
 export async function getGenreHealthSummary(userId: string, libraryId?: string) {
@@ -461,7 +468,7 @@ export async function getAudioFeatureHealthSummary(userId: string, libraryId?: s
     syncStatus: "active",
     library: { ...(libraryId ? { id: libraryId } : {}), server: { userId } },
   };
-  const [complete, missing, api, local, heuristic, partial, noData, failed, extractionFailed, analyzerFailed] = await Promise.all([
+  const [complete, missing, api, local, heuristic, partial, noData, failed, extractionFailed, analyzerFailed, tooShort] = await Promise.all([
     prisma.track.count({ where: { AND: [active, completeAudioFeatureTrackWhere()] } }),
     prisma.track.count({ where: { AND: [active, missingAudioFeatureTrackWhere()] } }),
     prisma.track.count({ where: { AND: [active, apiAudioFeatureTrackWhere()] } }),
@@ -472,8 +479,9 @@ export async function getAudioFeatureHealthSummary(userId: string, libraryId?: s
     prisma.track.count({ where: { AND: [active, audioFeatureFailedTrackWhere()] } }),
     prisma.track.count({ where: { AND: [active, audioFeatureExtractionFailedTrackWhere()] } }),
     prisma.track.count({ where: { AND: [active, audioFeatureAnalyzerFailedTrackWhere()] } }),
+    prisma.track.count({ where: { AND: [active, audioFeatureTooShortTrackWhere()] } }),
   ]);
-  return { complete, missing, api, local, heuristic, partial, noData, failed, extractionFailed, analyzerFailed };
+  return { complete, missing, api, local, heuristic, partial, noData, failed, extractionFailed, analyzerFailed, tooShort };
 }
 
 export function buildMissingTrackWhere(userId: string, filters: MissingTrackFilters = {}): Prisma.TrackWhereInput {
@@ -506,6 +514,7 @@ export function buildMissingTrackWhere(userId: string, filters: MissingTrackFilt
   if (filters.bpmStatus === "failed") and.push(bpmFailedTrackWhere());
   if (filters.bpmStatus === "extraction_failed") and.push(bpmExtractionFailedTrackWhere());
   if (filters.bpmStatus === "analyzer_failed") and.push(bpmAnalyzerFailedTrackWhere());
+  if (filters.bpmStatus === "too_short") and.push(bpmTooShortTrackWhere());
   if (filters.bpmStatus === "pending") and.push(pendingBpmBackfillTrackWhere());
 
   return { AND: and };
@@ -517,6 +526,7 @@ export function missingTrackBpmStatus(track: any) {
   if (marker === "no_data" || marker === "local_not_found") return "no_data";
   if (marker === "extraction_failed" || marker === "local_extraction_failed") return "extraction_failed";
   if (marker === "analyzer_failed" || marker === "local_analyzer_failed") return "analyzer_failed";
+  if (marker === "too_short" || marker === "local_too_short") return "too_short";
   if (marker === "failed" || marker === "local_failed") return "failed";
   return "pending";
 }
@@ -541,10 +551,10 @@ export async function getLibraryHealth(userId: string) {
     const active = { libraryId: library.id, syncStatus: "active" } as const;
     const [
       activeTracks, missingTracks, missingAlbums, missingArtists, tracksWithBpm,
-      bpmApi, bpmLocal, bpmImported, missingBpm, bpmNoData, bpmFailed, bpmExtractionFailed, bpmAnalyzerFailed, bpmPendingBackfill,
+      bpmApi, bpmLocal, bpmImported, missingBpm, bpmNoData, bpmFailed, bpmExtractionFailed, bpmAnalyzerFailed, bpmTooShort, bpmPendingBackfill,
       audioFeaturesComplete, audioFeaturesMissing, audioFeaturesApi, audioFeaturesLocal,
       audioFeaturesHeuristic, audioFeaturesPartial, audioFeaturesNoData, audioFeaturesFailed,
-      audioFeaturesExtractionFailed, audioFeaturesAnalyzerFailed,
+      audioFeaturesExtractionFailed, audioFeaturesAnalyzerFailed, audioFeaturesTooShort,
       tracksWithGenres, missingGenres, genreNoData, genreFailed, pendingGenreBackfill,
       tracksWithPopularity, missingPopularity, popularityNoData, popularityFailed, pendingPopularityBackfill,
       lastReconciliation,
@@ -562,6 +572,7 @@ export async function getLibraryHealth(userId: string) {
       prisma.track.count({ where: { AND: [active, bpmFailedTrackWhere()] } }),
       prisma.track.count({ where: { AND: [active, bpmExtractionFailedTrackWhere()] } }),
       prisma.track.count({ where: { AND: [active, bpmAnalyzerFailedTrackWhere()] } }),
+      prisma.track.count({ where: { AND: [active, bpmTooShortTrackWhere()] } }),
       prisma.track.count({ where: { AND: [active, pendingBpmBackfillTrackWhere()] } }),
       prisma.track.count({ where: { AND: [active, completeAudioFeatureTrackWhere()] } }),
       prisma.track.count({ where: { AND: [active, missingAudioFeatureTrackWhere()] } }),
@@ -573,6 +584,7 @@ export async function getLibraryHealth(userId: string) {
       prisma.track.count({ where: { AND: [active, audioFeatureFailedTrackWhere()] } }),
       prisma.track.count({ where: { AND: [active, audioFeatureExtractionFailedTrackWhere()] } }),
       prisma.track.count({ where: { AND: [active, audioFeatureAnalyzerFailedTrackWhere()] } }),
+      prisma.track.count({ where: { AND: [active, audioFeatureTooShortTrackWhere()] } }),
       prisma.track.count({ where: { AND: [active, tracksWithGenresWhere()] } }),
       prisma.track.count({ where: { AND: [active, missingGenresWhere()] } }),
       prisma.track.count({ where: { AND: [active, genreNoDataWhere()] } }),
@@ -620,6 +632,7 @@ export async function getLibraryHealth(userId: string) {
       bpmFailed,
       bpmExtractionFailed,
       bpmAnalyzerFailed,
+      bpmTooShort,
       bpmPendingBackfill,
       audioFeaturesComplete,
       audioFeaturesMissing,
@@ -631,6 +644,7 @@ export async function getLibraryHealth(userId: string) {
       audioFeaturesFailed,
       audioFeaturesExtractionFailed,
       audioFeaturesAnalyzerFailed,
+      audioFeaturesTooShort,
       bpmProviderMode,
       audioFeatureProviderMode,
       tracksWithGenres,

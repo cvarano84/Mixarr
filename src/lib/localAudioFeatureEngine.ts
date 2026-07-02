@@ -8,10 +8,12 @@ import {
   buildBpmSampleWindows,
   decodeAudioSourceToWav,
   extractAudioSampleFromSources,
+  isShortTrackBpmError,
   redactSensitiveUrl,
   runCommand,
   validateAudioSample,
   type AudioInputSource,
+  type ShortTrackBpmError,
 } from "./localBpmEngine";
 import {
   completeAudioFeatureWhere,
@@ -44,6 +46,18 @@ const localAudioFeatureGlobals = globalThis as typeof globalThis & {
   mixarrLocalAudioFeatureShutdownRequested?: boolean;
   mixarrLocalAudioFeatureSignalHandlersInstalled?: boolean;
 };
+
+function positiveNumber(value: unknown, fallback: number) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function formatSeconds(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, "");
+}
+
+const minimumAudioFeatureDurationSeconds = positiveNumber(process.env.LOCAL_AUDIO_FEATURES_MIN_DURATION_SECONDS, 10);
+const allowShortWholeTrackAnalysis = boolSetting(undefined, "LOCAL_AUDIO_FEATURES_ALLOW_SHORT_TRACKS", false);
 
 export type LocalAudioFeatureAnalysisScope = "windows" | "whole_track";
 
@@ -85,6 +99,18 @@ class AnalyzerFailedAudioFeatureError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "AnalyzerFailedAudioFeatureError";
+  }
+}
+
+class ShortTrackAudioFeatureError extends Error {
+  constructor(
+    message: string,
+    readonly durationSeconds: number,
+    readonly minimumDurationSeconds: number,
+    readonly sourceType?: string,
+  ) {
+    super(message);
+    this.name = "ShortTrackAudioFeatureError";
   }
 }
 
@@ -417,6 +443,34 @@ function redactedMessage(error: unknown) {
   return redactSensitiveUrl(message);
 }
 
+function audioFeatureShortTrackReason(durationSeconds: number, minimumDurationSeconds = minimumAudioFeatureDurationSeconds) {
+  return `Track duration ${durationSeconds.toFixed(2)}s is below minimum ${formatSeconds(minimumDurationSeconds)}s for local audio feature analysis`;
+}
+
+function shortTrackError(durationSeconds: number, sourceType?: string) {
+  return new ShortTrackAudioFeatureError(
+    audioFeatureShortTrackReason(durationSeconds),
+    durationSeconds,
+    minimumAudioFeatureDurationSeconds,
+    sourceType,
+  );
+}
+
+function validateMinimumAudioFeatureDuration(durationSeconds: number, sourceType?: string, allowConfiguredShortWholeTrack = false) {
+  if (
+    durationSeconds < minimumAudioFeatureDurationSeconds
+    && !(allowConfiguredShortWholeTrack && allowShortWholeTrackAnalysis && durationSeconds >= 5)
+  ) {
+    throw shortTrackError(durationSeconds, sourceType);
+  }
+}
+
+function wholeTrackValidationMinimumSeconds() {
+  return allowShortWholeTrackAnalysis
+    ? Math.min(minimumAudioFeatureDurationSeconds, 5)
+    : minimumAudioFeatureDurationSeconds;
+}
+
 function fullTrackTimeoutMs(track: any) {
   const durationSeconds = track.duration ? Number(track.duration) / 1000 : 0;
   return Math.max(300000, Math.ceil(Math.max(durationSeconds, 60) * 2500));
@@ -439,8 +493,16 @@ async function analyzeWholeTrackSource(
   const sourceTypes = [source.type];
 
   if (source.type === "local-file") {
-    const validation = await validateAudioSample(source.input);
+    const validation = await validateAudioSample(source.input, undefined, {
+      minimumDurationSeconds: wholeTrackValidationMinimumSeconds(),
+    });
+    if (validation.failureCode === "too_short" && validation.duration !== undefined) {
+      throw shortTrackError(validation.duration, source.type);
+    }
     if (validation.ok) {
+      if (validation.duration !== undefined) {
+        validateMinimumAudioFeatureDuration(validation.duration, source.type, true);
+      }
       try {
         const direct = await analyzeSampleWithEssentia(source.input, timeoutMs);
         const directResult = resultFromWholeTrack(direct, sourceTypes);
@@ -460,16 +522,24 @@ async function analyzeWholeTrackSource(
   const wavPath = path.join(tempDir, `whole-track-${index}.wav`);
   let validation;
   try {
-    validation = await decodeAudioSourceToWav(source, wavPath, timeoutMs);
+    validation = await decodeAudioSourceToWav(source, wavPath, timeoutMs, {
+      minimumDurationSeconds: wholeTrackValidationMinimumSeconds(),
+    });
   } catch (error) {
     throw new ExtractionFailedAudioFeatureError(
       `ffmpeg could not decode whole-track WAV from ${source.type}: ${redactedMessage(error)}`,
     );
   }
+  if (validation.failureCode === "too_short" && validation.duration !== undefined) {
+    throw shortTrackError(validation.duration, source.type);
+  }
   if (!validation.ok) {
     throw new ExtractionFailedAudioFeatureError(
       `Decoded whole-track WAV did not validate from ${source.type}: ${validation.reason || "unknown validation failure"}`,
     );
+  }
+  if (validation.duration !== undefined) {
+    validateMinimumAudioFeatureDuration(validation.duration, source.type, true);
   }
 
   const decoded = await analyzeSampleWithEssentia(wavPath, timeoutMs);
@@ -491,6 +561,12 @@ async function analyzeTrackWholeTrack(track: any, tempDir: string): Promise<Loca
       validatedSourceCount += 1;
       if (result) return result;
     } catch (error) {
+      if (error instanceof ShortTrackAudioFeatureError) {
+        console.warn(
+          `[LocalAudioFeatureEngine] Short track skipped: ${trackLabel(track)} duration=${error.durationSeconds.toFixed(2)}s minimum=${formatSeconds(error.minimumDurationSeconds)}s source=${error.sourceType || source.type}`,
+        );
+        throw error;
+      }
       const message = redactedMessage(error);
       if (error instanceof ExtractionFailedAudioFeatureError) {
         extractionErrors.push(`${source.type}: ${message}`);
@@ -519,6 +595,11 @@ async function analyzeTrackWholeTrack(track: any, tempDir: string): Promise<Loca
 }
 
 async function analyzeTrackWindows(track: any, tempDir: string): Promise<LocalAudioFeatureResult | null> {
+  const trackDurationSeconds = track.duration ? Number(track.duration) / 1000 : null;
+  if (trackDurationSeconds !== null) {
+    validateMinimumAudioFeatureDuration(trackDurationSeconds);
+  }
+
   const windows = buildBpmSampleWindows(track.duration);
   const results: LocalAudioFeatureWindowResult[] = [];
   const sourceTypes: string[] = [];
@@ -539,6 +620,11 @@ async function analyzeTrackWindows(track: any, tempDir: string): Promise<LocalAu
       );
       sourceTypes.push(sourceType);
     } catch (error) {
+      if (isShortTrackBpmError(error)) {
+        const durationSeconds = (error as ShortTrackBpmError).durationSeconds;
+        if (durationSeconds !== undefined) throw shortTrackError(durationSeconds);
+        throw error;
+      }
       const message = redactedMessage(error);
       extractionErrors.push(`${sampleWindow.label}: ${message}`);
       console.warn(`[LocalAudioFeatureEngine] Skipping ${sampleWindow.label} sample for "${trackLabel(track)}": ${message}`);
@@ -1051,16 +1137,27 @@ export const runLocalAudioFeatureEngine = async (options: SyncEngineOptions = {}
             progressProcessed += 1;
           }
         } catch (error) {
-          outcome = "error";
-          progressFailed += 1;
           const message = error instanceof Error ? error.message : String(error);
-          if (error instanceof ExtractionFailedAudioFeatureError) {
+          if (error instanceof ShortTrackAudioFeatureError) {
+            outcome = "not_found";
+            await saveFailure(track.id, "too_short", analysisScope, message);
+            progressProcessed += 1;
+            console.warn(
+              `[LocalAudioFeatureEngine] Persisting audio feature short-track marker for track ${track.id} (too_short)`,
+            );
+          } else if (error instanceof ExtractionFailedAudioFeatureError) {
+            outcome = "error";
+            progressFailed += 1;
             await saveFailure(track.id, "extraction_failed", analysisScope, message);
             console.error(`[LocalAudioFeatureEngine] Extraction failed ${trackLabel(track)}: ${message}`);
           } else if (error instanceof AnalyzerFailedAudioFeatureError) {
+            outcome = "error";
+            progressFailed += 1;
             await saveFailure(track.id, "analyzer_failed", analysisScope, message);
             console.error(`[LocalAudioFeatureEngine] Analyzer failed ${trackLabel(track)}: ${message}`);
           } else {
+            outcome = "error";
+            progressFailed += 1;
             await saveFailure(track.id, "analyzer_failed", analysisScope, message);
             console.error(`[LocalAudioFeatureEngine] Failed ${trackLabel(track)}: ${message}`);
           }
@@ -1076,13 +1173,14 @@ export const runLocalAudioFeatureEngine = async (options: SyncEngineOptions = {}
     });
     logProgress(true);
 
-    const [api, local, noData, failed] = await runWithConcurrency([
+    const [api, local, noData, tooShort, failed] = await runWithConcurrency([
       () => prisma.audioFeature.count({ where: { audioFeatureSource: "api", track: { syncStatus: "active" } } }),
       () => prisma.audioFeature.count({ where: { audioFeatureSource: { in: ["local_essentia", "mixed"] }, track: { syncStatus: "active" } } }),
       () => prisma.audioFeature.count({ where: { audioFeatureStatus: "no_data", track: { syncStatus: "active" } } }),
+      () => prisma.audioFeature.count({ where: { audioFeatureStatus: "too_short", track: { syncStatus: "active" } } }),
       () => prisma.audioFeature.count({ where: { audioFeatureStatus: { in: ["extraction_failed", "analyzer_failed"] }, track: { syncStatus: "active" } } }),
     ], resolveDbJobConcurrency());
-    console.log(`[LocalAudioFeatureEngine] Completed: api=${api} local=${local} no_data=${noData} failed=${failed}`);
+    console.log(`[LocalAudioFeatureEngine] Completed: api=${api} local=${local} no_data=${noData} too_short=${tooShort} failed=${failed}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[LocalAudioFeatureEngine] Sync failed: ${message}`);

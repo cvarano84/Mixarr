@@ -92,8 +92,13 @@ export type AudioInputSource = {
 export type AudioSampleValidation = {
   ok: boolean;
   reason?: string;
+  failureCode?: "too_short";
   duration?: number;
   sizeBytes?: number;
+};
+
+type AudioSampleValidationOptions = {
+  minimumDurationSeconds?: number;
 };
 
 type ExtractedAudioSample = Required<Pick<AudioSampleValidation, "duration" | "sizeBytes">> & {
@@ -174,6 +179,17 @@ class AnalyzerFailedBpmError extends Error {
   }
 }
 
+export class ShortTrackBpmError extends Error {
+  constructor(
+    message: string,
+    readonly durationSeconds?: number,
+    readonly minimumDurationSeconds = minimumSampleDurationSeconds,
+  ) {
+    super(message);
+    this.name = "ShortTrackBpmError";
+  }
+}
+
 function isRetryableLocalBpmError(error: unknown) {
   return error instanceof RetryableLocalBpmError;
 }
@@ -184,6 +200,18 @@ function isExtractionFailedBpmError(error: unknown) {
 
 function isAnalyzerFailedBpmError(error: unknown) {
   return error instanceof AnalyzerFailedBpmError;
+}
+
+export function isShortTrackBpmError(error: unknown) {
+  return error instanceof ShortTrackBpmError;
+}
+
+function formatSeconds(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function shortTrackFailureReason(durationSeconds: number, minimumDurationSeconds = minimumSampleDurationSeconds) {
+  return `Track duration ${durationSeconds.toFixed(2)}s is below minimum ${formatSeconds(minimumDurationSeconds)}s for local BPM analysis`;
 }
 
 export function redactSensitiveUrl(value: string) {
@@ -555,7 +583,11 @@ export function runCommand(command: string, args: string[], timeoutMs: number): 
   });
 }
 
-export async function validateAudioSample(samplePath: string, requestedDurationSeconds?: number): Promise<AudioSampleValidation> {
+export async function validateAudioSample(
+  samplePath: string,
+  requestedDurationSeconds?: number,
+  options: AudioSampleValidationOptions = {},
+): Promise<AudioSampleValidation> {
   if (!existsSync(samplePath)) {
     return { ok: false, reason: "sample file does not exist" };
   }
@@ -595,10 +627,12 @@ export async function validateAudioSample(samplePath: string, requestedDurationS
     if (!Number.isFinite(duration) || duration <= 0) {
       return { ok: false, reason: "ffprobe could not read a valid duration", sizeBytes };
     }
-    if (duration < minimumSampleDurationSeconds) {
+    const minimumDurationSeconds = options.minimumDurationSeconds || minimumSampleDurationSeconds;
+    if (duration < minimumDurationSeconds) {
       return {
         ok: false,
-        reason: `sample duration is too short (${duration.toFixed(2)}s; minimum is ${minimumSampleDurationSeconds}s)`,
+        reason: `sample duration is too short (${duration.toFixed(2)}s; minimum is ${formatSeconds(minimumDurationSeconds)}s)`,
+        failureCode: "too_short",
         duration,
         sizeBytes,
       };
@@ -622,11 +656,12 @@ export async function decodeAudioSourceToWav(
   source: AudioInputSource,
   outputPath: string,
   timeoutMs = 300000,
+  validationOptions: AudioSampleValidationOptions = {},
 ): Promise<AudioSampleValidation> {
   await mkdir(path.dirname(outputPath), { recursive: true });
   await rm(outputPath, { force: true }).catch(() => undefined);
   await runCommand(ffmpegPath, buildFfmpegFullTrackDecodeArgs(source, outputPath), timeoutMs);
-  return validateAudioSample(outputPath);
+  return validateAudioSample(outputPath, undefined, validationOptions);
 }
 
 function runCommandToBuffer(command: string, args: string[], timeoutMs: number, maxOutputBytes: number): Promise<Buffer> {
@@ -762,6 +797,9 @@ async function extractAudioSample(
       const validation = await validateAudioSample(temporaryPath, durationSeconds);
       if (!validation.ok || validation.duration === undefined || validation.sizeBytes === undefined) {
         const reason = validation.reason || "unknown validation failure";
+        if (validation.failureCode === "too_short" && validation.duration !== undefined) {
+          throw new ShortTrackBpmError(shortTrackFailureReason(validation.duration), validation.duration);
+        }
         console.warn(
           `[LocalBpmEngine] Invalid BPM sample using ${source.type} for "${displayTrack}" (${windowLabel}, seekMode=${attempt.seekMode}): ${reason}`,
         );
@@ -782,6 +820,7 @@ async function extractAudioSample(
         seekMode: attempt.seekMode,
       };
     } catch (error) {
+      if (isShortTrackBpmError(error)) throw error;
       lastError = error;
       await rm(temporaryPath, { force: true }).catch(() => undefined);
       if (attempt.preInputSeek && !isPermanentSourceError(error)) {
@@ -834,6 +873,9 @@ export async function extractAudioSampleFromSources(
       );
       return source.type;
     } catch (error) {
+      if (isShortTrackBpmError(error)) {
+        throw error;
+      }
       const message = sanitizedErrorMessage(error);
       errors.push(`${source.type}: ${message}`);
       console.warn(
@@ -1020,6 +1062,11 @@ function tempoSourceForAnalyzer(analyzer: LocalBpmAnalyzer, scope: LocalBpmAnaly
 }
 
 async function analyzeTrackWindows(track: any, tempDir: string, analyzer: LocalBpmAnalyzer) {
+  const trackDurationSeconds = track.duration ? Number(track.duration) / 1000 : null;
+  if (trackDurationSeconds !== null && trackDurationSeconds < minimumSampleDurationSeconds) {
+    throw new ShortTrackBpmError(shortTrackFailureReason(trackDurationSeconds), trackDurationSeconds);
+  }
+
   const sampleWindows = buildBpmSampleWindows(track.duration);
   const results: WindowBpmResult[] = [];
   let extractedWindowCount = 0;
@@ -1040,6 +1087,7 @@ async function analyzeTrackWindows(track: any, tempDir: string, analyzer: LocalB
       );
       extractedWindowCount += 1;
     } catch (error) {
+      if (isShortTrackBpmError(error)) throw error;
       extractionErrors.push(sanitizedErrorMessage(error));
       console.warn(
         `[LocalBpmEngine] Skipping ${sampleWindow.label} sample for "${trackLabel(track)}": ${sanitizedErrorMessage(error)}`,
@@ -1098,6 +1146,9 @@ async function analyzeTrackWholeTrack(track: any, tempDir: string, analyzer: Loc
       `[LocalBpmEngine] Whole-track analysis requested for "${track.artist.title} - ${track.title}" but duration is missing; using windows.`,
     );
     return analyzeTrackWindows(track, tempDir, analyzer);
+  }
+  if (trackDurationSeconds < minimumSampleDurationSeconds) {
+    throw new ShortTrackBpmError(shortTrackFailureReason(trackDurationSeconds), trackDurationSeconds);
   }
 
   const wavPath = path.join(tempDir, "whole-track.wav");
@@ -1558,6 +1609,13 @@ export const runLocalBpmEngine = async (options: SyncEngineOptions = {}) => {
             );
           } else {
             await saveBpmAttemptWithoutResult(track.id, "local_extraction_failed", "extraction_failed", sanitizedErrorMessage(error));
+          }
+        } else if (isShortTrackBpmError(error)) {
+          outcome = "not_found";
+          const reason = sanitizedErrorMessage(error);
+          console.warn(`[LocalBpmEngine] Short track skipped: ${track.artist.title} - ${track.title} ${reason}`);
+          if (!preserveExistingAubio) {
+            await saveBpmAttemptWithoutResult(track.id, "local_too_short", "too_short", reason, localAnalysisScope);
           }
         } else if (isRetryableLocalBpmError(error)) {
           outcome = "error";

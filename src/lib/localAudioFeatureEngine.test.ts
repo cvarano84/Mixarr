@@ -52,8 +52,8 @@ describe("LocalAudioFeatureEngine backfill predicates", () => {
     assert.equal(needsLocalAudioFeatureBackfill(track), false);
   });
 
-  it("does not reprocess local no-data or failed attempts until retry/reset", () => {
-    for (const status of ["no_data", "extraction_failed", "analyzer_failed"]) {
+  it("does not reprocess local no-data, failed, or too-short attempts until retry/reset", () => {
+    for (const status of ["no_data", "extraction_failed", "analyzer_failed", "too_short"]) {
       assert.equal(needsLocalAudioFeatureBackfill({
         syncStatus: "active",
         audioFeature: {
