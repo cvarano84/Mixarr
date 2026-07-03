@@ -8,6 +8,7 @@ import {
   audioFeatureNoDataTrackWhere,
   audioFeatureTooShortTrackWhere,
   completeAudioFeatureTrackWhere,
+  getEffectiveAudioFeatures,
   heuristicAudioFeatureTrackWhere,
   localAudioFeatureTrackWhere,
   missingAudioFeatureTrackWhere,
@@ -858,6 +859,7 @@ export function serializeMetadataHealthTrack(track: any) {
 
 export function serializeAudioFeatureHealthTrack(track: any) {
   const feature = track.audioFeature;
+  const effective = getEffectiveAudioFeatures(track, { preferLocalAudioFeatures: true, allowEstimated: true });
   return {
     id: track.id,
     title: track.title,
@@ -867,11 +869,11 @@ export function serializeAudioFeatureHealthTrack(track: any) {
     duration: track.duration,
     mediaPath: track.mediaPath,
     ratingKey: track.ratingKey,
-    energy: feature?.effectiveEnergy ?? feature?.energy ?? null,
-    mood: feature?.effectiveMood ?? feature?.valence ?? null,
-    bpm: feature?.tempo ?? null,
-    danceability: feature?.effectiveDanceability ?? feature?.danceability ?? null,
-    acousticness: feature?.effectiveAcousticness ?? feature?.acousticness ?? null,
+    energy: effective.energy,
+    mood: effective.mood,
+    bpm: effective.tempo,
+    danceability: effective.danceability,
+    acousticness: effective.acousticness,
     api: {
       energy: feature?.apiEnergy ?? null,
       mood: feature?.apiMood ?? null,
@@ -886,10 +888,10 @@ export function serializeAudioFeatureHealthTrack(track: any) {
       acousticness: feature?.localAcousticness ?? null,
       loudness: feature?.localLoudness ?? null,
     },
-    source: feature?.audioFeatureSource || feature?.source || null,
+    source: effective.source || feature?.source || null,
     analysisScope: feature?.audioFeatureAnalysisScope || null,
     confidence: feature?.audioFeatureConfidence ?? feature?.confidence ?? null,
-    status: feature?.audioFeatureStatus || (feature ? "partial" : "pending"),
+    status: effective.complete ? "success" : feature?.audioFeatureStatus || (feature ? "partial" : "pending"),
     failureReason: feature?.audioFeatureFailureReason || null,
     analyzedAt: feature?.audioFeatureAnalyzedAt || null,
     fieldSources: {
@@ -901,6 +903,50 @@ export function serializeAudioFeatureHealthTrack(track: any) {
     lastSeenAt: track.lastSeenAt,
     syncStatus: track.syncStatus,
   };
+}
+
+export function audioFeatureMissingFields(track: any) {
+  return getEffectiveAudioFeatures(track, {
+    preferLocalAudioFeatures: true,
+    allowEstimated: true,
+  }).missingFields;
+}
+
+export async function logPartialAudioFeatureRetryResult(options: {
+  userId: string;
+  libraryId?: string;
+  before: number;
+  processed: number;
+  failed: number;
+}) {
+  const active: Prisma.TrackWhereInput = {
+    syncStatus: "active",
+    library: {
+      ...(options.libraryId ? { id: options.libraryId } : {}),
+      server: { userId: options.userId },
+    },
+  };
+  const where: Prisma.TrackWhereInput = {
+    AND: [active, partialAudioFeatureTrackWhere()],
+  };
+  const [remaining, tracks] = await Promise.all([
+    prisma.track.count({ where }),
+    prisma.track.findMany({
+      where,
+      select: audioFeatureHealthTrackSelect,
+      orderBy: [{ artist: { title: "asc" } }, { album: { title: "asc" } }, { title: "asc" }],
+      take: 10,
+    }),
+  ]);
+
+  console.log(
+    `[LibraryHealth] partial_audio_features after retry: before=${options.before} processed=${options.processed} failed=${options.failed} remaining=${remaining}`,
+  );
+  for (const track of tracks) {
+    console.log(
+      `[LibraryHealth] Remaining partial: ratingKey=${track.ratingKey} artist=${JSON.stringify(track.artist?.title || "Unknown artist")} title=${JSON.stringify(track.title)} missing=${JSON.stringify(audioFeatureMissingFields(track))}`,
+    );
+  }
 }
 
 export function serializeMissingTrack(track: any) {

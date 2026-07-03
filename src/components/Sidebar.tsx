@@ -1,7 +1,7 @@
 "use client";
 
 import styles from "./Sidebar.module.css";
-import { AudioWaveform, BadgeCheck, LayoutDashboard, ListMusic, Settings, Tags, Wand2 } from "lucide-react";
+import { AudioWaveform, BadgeCheck, ExternalLink, Github, LayoutDashboard, ListMusic, Settings, Tags, Wand2 } from "lucide-react";
 import PlexLoginButton from "./PlexLoginButton";
 import LogoutButton from "./LogoutButton";
 import Link from "next/link";
@@ -25,15 +25,39 @@ export default function Sidebar({ user, appVersion }: { user: any; appVersion: s
             </span>
           </div>
           <p className={styles.logoSubtitle}>Smart Playlist Engine</p>
-          <span className={styles.versionBadge} aria-label={`Mixarr version ${appVersion}`}>
-            v{appVersion}
-          </span>
+          <div className={styles.brandMeta}>
+            <span className={styles.versionBadge} aria-label={`Mixarr version ${appVersion}`}>
+              v{appVersion}
+            </span>
+            <a
+              href="https://github.com/cvarano84/Mixarr"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Open Mixarr GitHub repository"
+              className={styles.githubLink}
+            >
+              <Github size={13} />
+              <span>GitHub</span>
+              <ExternalLink size={11} aria-hidden="true" />
+            </a>
+          </div>
         </div>
       </div>
       <span className={styles.mobileVersionBadge} aria-label={`Official Mixarr version ${appVersion}`}>
         <BadgeCheck size={12} />
         Official v{appVersion}
       </span>
+      <a
+        href="https://github.com/cvarano84/Mixarr"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Open Mixarr GitHub repository"
+        className={styles.mobileGithubLink}
+      >
+        <Github size={12} />
+        <span>GitHub</span>
+        <ExternalLink size={10} aria-hidden="true" />
+      </a>
 
       <nav className={styles.nav}>
         <Link href="/" className={`${styles.navItem} ${pathname === "/" ? styles.active : ""}`}>

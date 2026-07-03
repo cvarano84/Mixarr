@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { revalidatePath } from "next/cache";
 import { getUserSyncSettings } from "@/lib/syncSettings";
 import { alreadyRunningPayload, startSyncJobInBackground } from "@/lib/syncJobRunner";
 
@@ -21,6 +22,7 @@ export async function POST() {
         const apiSummary = await audio.runAudioFeatureEngine(syncSettings);
         const local = await import("@/lib/localAudioFeatureEngine");
         const localSummary = await local.runLocalAudioFeatureEngine(syncSettings);
+        revalidatePath("/settings/library-health");
         return {
           attempted: apiSummary.attempted + localSummary.attempted,
           processed: apiSummary.processed + localSummary.processed,

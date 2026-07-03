@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { revalidatePath } from "next/cache";
 import { runSyncEngine } from "@/lib/syncEngine";
+import { getAudioFeatureHealthSummary, logPartialAudioFeatureRetryResult } from "@/lib/libraryHealth";
 import { getUserSyncSettings, resolveMetadataProviderSettings } from "@/lib/syncSettings";
 import { alreadyRunningPayload, startSyncJobInBackground } from "@/lib/syncJobRunner";
 
@@ -14,7 +16,7 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { libraryId, engine = 'plex', providerMode } = body;
+    const { libraryId, engine = 'plex', providerMode, audioFeaturePartialBefore } = body;
     const baseSyncSettings = await getUserSyncSettings(userId);
     const syncSettings = {
       ...baseSyncSettings,
@@ -56,10 +58,21 @@ export async function POST(req: Request) {
         engine,
         trackedEngine: engine,
         task: async () => {
+          const beforePartial = typeof audioFeaturePartialBefore === "number"
+            ? audioFeaturePartialBefore
+            : (await getAudioFeatureHealthSummary(userId, libraryId)).partial;
           const audio = await import('@/lib/audioFeatureEngine');
           const apiSummary = await audio.runAudioFeatureEngine(syncSettings);
           const local = await import('@/lib/localAudioFeatureEngine');
           const localSummary = await local.runLocalAudioFeatureEngine(syncSettings);
+          await logPartialAudioFeatureRetryResult({
+            userId,
+            libraryId,
+            before: beforePartial,
+            processed: localSummary.processed,
+            failed: localSummary.failed,
+          });
+          revalidatePath("/settings/library-health");
           return {
             attempted: apiSummary.attempted + localSummary.attempted,
             processed: apiSummary.processed + localSummary.processed,

@@ -105,6 +105,13 @@
   margin: 0.08rem 0 0.55rem;
 }
 
+.brandMeta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
 .versionBadge {
   display: inline-block;
   border: 1px solid rgba(124, 111, 247, 0.35);
@@ -114,7 +121,43 @@
   padding: 0.28rem 0.5rem;
 }
 
+.githubLink,
+.mobileGithubLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.28rem;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--fg);
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+  padding: 0.28rem 0.5rem;
+  white-space: nowrap;
+}
+
+.githubLink:hover,
+.mobileGithubLink:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+.githubLink:focus-visible,
+.mobileGithubLink:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-dim);
+}
+
 .mobileVersionBadge {
+  display: none;
+}
+
+.mobileGithubLink {
   display: none;
 }
 
@@ -143,6 +186,18 @@
     border: 1px solid rgba(124, 111, 247, 0.32);
     background: rgba(20, 20, 24, 0.94);
     color: #d9d5ff;
+    font-size: 0.65rem;
+    padding: 0.26rem 0.5rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  }
+
+  .mobileGithubLink {
+    display: inline-flex;
+    position: absolute;
+    left: 0.75rem;
+    top: -1.55rem;
+    background: rgba(20, 20, 24, 0.94);
+    color: var(--fg);
     font-size: 0.65rem;
     padding: 0.26rem 0.5rem;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);

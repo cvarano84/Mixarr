@@ -17,6 +17,8 @@ import {
 } from "./localBpmEngine";
 import {
   completeAudioFeatureWhere,
+  getEffectiveAudioFeatures,
+  localEssentiaAudioFeatureSuccessTrackWhere,
   missingAudioFeatureTrackWhere,
   type AudioFeatureStatus,
 } from "./audioFeatures";
@@ -693,16 +695,9 @@ function shouldKeepExistingField(existing: any, field: string, sourceField: stri
   return existing?.[sourceField] === "api" || isApiOwnedSource(existing?.source, existing?.audioFeatureSource);
 }
 
-function audioFeatureStatusFor(data: Record<string, unknown>): AudioFeatureStatus {
-  const required = ["energy", "valence", "danceability", "acousticness", "tempo"];
-  const present = required.filter((field) => data[field] !== null && data[field] !== undefined).length;
-  if (present === required.length) return "success";
-  if (present > 0) return "partial";
-  return "no_data";
-}
-
 function firstNumber(...values: unknown[]) {
   for (const value of values) {
+    if (value === null || value === undefined || value === "") continue;
     const number = Number(value);
     if (Number.isFinite(number)) return number;
   }
@@ -713,9 +708,9 @@ function resolveEffectiveLocalAudioFeatureData(existing: any, options: {
   preferLocal: boolean;
   allowEstimated: boolean;
 }) {
-  const localMood = options.allowEstimated ? existing?.localMood ?? null : null;
-  const localDanceability = options.allowEstimated ? existing?.localDanceability ?? null : null;
-  const localAcousticness = options.allowEstimated ? existing?.localAcousticness ?? null : null;
+  const localMood = existing?.localMood ?? null;
+  const localDanceability = existing?.localDanceability ?? null;
+  const localAcousticness = existing?.localAcousticness ?? null;
 
   return options.preferLocal
     ? {
@@ -731,7 +726,88 @@ function resolveEffectiveLocalAudioFeatureData(existing: any, options: {
       danceability: firstNumber(existing?.apiDanceability, localDanceability),
       acousticness: firstNumber(existing?.apiAcousticness, localAcousticness),
       loudness: firstNumber(existing?.apiLoudness, existing?.localLoudness),
-    };
+  };
+}
+
+function audioFeatureStatusFor(data: Record<string, unknown>, options: {
+  preferLocal: boolean;
+  allowEstimated: boolean;
+}): AudioFeatureStatus {
+  const effective = getEffectiveAudioFeatures({ audioFeature: data }, {
+    preferLocalAudioFeatures: options.preferLocal,
+    allowEstimated: options.allowEstimated,
+  });
+  if (effective.complete) return "success";
+  if ([effective.energy, effective.mood, effective.danceability, effective.acousticness, effective.tempo].some((value) => value !== null)) {
+    return "partial";
+  }
+  return "no_data";
+}
+
+function sourceForEffectiveField(effectiveValue: number | null, apiValue: unknown, localValue: unknown) {
+  if (effectiveValue === null) return null;
+  if (apiValue !== null && apiValue !== undefined && apiValue !== "") {
+    const apiNumber = Number(apiValue);
+    if (Number.isFinite(apiNumber) && apiNumber === effectiveValue) return "api";
+  }
+  if (localValue !== null && localValue !== undefined && localValue !== "") {
+    const localNumber = Number(localValue);
+    if (Number.isFinite(localNumber) && localNumber === effectiveValue) return "local_essentia";
+  }
+  return null;
+}
+
+function savedFeatureSelect() {
+  return {
+    id: true,
+    title: true,
+    artist: { select: { title: true } },
+    audioFeature: true,
+  } as const;
+}
+
+async function logPostSaveVerification(trackId: string, settings: {
+  preferLocal: boolean;
+  allowEstimated: boolean;
+}) {
+  const saved = await prisma.track.findUnique({
+    where: { id: trackId },
+    select: savedFeatureSelect(),
+  });
+  if (!saved?.audioFeature) return;
+  const feature = saved.audioFeature;
+  const effective = getEffectiveAudioFeatures(saved, {
+    preferLocalAudioFeatures: settings.preferLocal,
+    allowEstimated: settings.allowEstimated,
+  });
+  const selectedForPartialRetry = effective.partial;
+  console.log("[LocalAudioFeatureEngine] Saved local audio features:", {
+    id: saved.id,
+    title: `${saved.artist.title} - ${saved.title}`,
+    audioFeatureStatus: feature.audioFeatureStatus,
+    audioFeatureSource: feature.audioFeatureSource,
+    audioFeatureAnalysisScope: feature.audioFeatureAnalysisScope,
+    energy: feature.energy,
+    mood: feature.valence,
+    danceability: feature.danceability,
+    acousticness: feature.acousticness,
+    tempo: feature.tempo,
+    localEnergy: feature.localEnergy,
+    localMood: feature.localMood,
+    localDanceability: feature.localDanceability,
+    localAcousticness: feature.localAcousticness,
+    effectiveEnergy: effective.energy,
+    effectiveMood: effective.mood,
+    effectiveDanceability: effective.danceability,
+    effectiveAcousticness: effective.acousticness,
+    effectiveTempo: effective.tempo,
+  });
+  console.log("[LocalAudioFeatureEngine] Completion check after save:", {
+    complete: effective.complete,
+    partial: effective.partial,
+    missingFields: effective.missingFields,
+    selectedForPartialRetry,
+  });
 }
 
 async function saveLocalFeatures(track: any, result: LocalAudioFeatureResult, options: {
@@ -760,9 +836,9 @@ async function saveLocalFeatures(track: any, result: LocalAudioFeatureResult, op
   };
   update.localEnergy = result.energy;
   update.localLoudness = result.loudness;
-  update.localMood = options.allowEstimatedMoodAcousticness ? result.valence : existing.localMood ?? null;
-  update.localDanceability = options.allowEstimatedMoodAcousticness ? result.danceability : existing.localDanceability ?? null;
-  update.localAcousticness = options.allowEstimatedMoodAcousticness ? result.acousticness : existing.localAcousticness ?? null;
+  update.localMood = result.valence;
+  update.localDanceability = result.danceability;
+  update.localAcousticness = result.acousticness;
 
   const setField = (field: string, sourceField: string, value: number | null, source: string) => {
     if (value === null || shouldKeepExistingField(existing, field, sourceField, !options.preferLocal, options.force)) {
@@ -775,18 +851,9 @@ async function saveLocalFeatures(track: any, result: LocalAudioFeatureResult, op
   };
 
   setField("energy", "energySource", result.energy, "local_essentia");
-  if (options.allowEstimatedMoodAcousticness) {
-    setField("valence", "valenceSource", result.valence, "local_heuristic");
-    setField("danceability", "danceabilitySource", result.danceability, "local_heuristic");
-    setField("acousticness", "acousticnessSource", result.acousticness, "local_heuristic");
-  } else {
-    update.valence = existing.valence ?? null;
-    update.valenceSource = existing.valenceSource ?? null;
-    update.danceability = existing.danceability ?? null;
-    update.danceabilitySource = existing.danceabilitySource ?? null;
-    update.acousticness = existing.acousticness ?? null;
-    update.acousticnessSource = existing.acousticnessSource ?? null;
-  }
+  setField("valence", "valenceSource", result.valence, "local_essentia");
+  setField("danceability", "danceabilitySource", result.danceability, "local_essentia");
+  setField("acousticness", "acousticnessSource", result.acousticness, "local_essentia");
   if (result.tempo !== null && !shouldKeepExistingField(existing, "tempo", "tempoSource", !options.preferLocal, options.force)) {
     update.tempo = result.tempo;
     update.tempoSource = "Essentia local audio feature analysis";
@@ -806,19 +873,23 @@ async function saveLocalFeatures(track: any, result: LocalAudioFeatureResult, op
   update.danceability = effective.danceability;
   update.acousticness = effective.acousticness;
   update.loudness = effective.loudness;
-  update.energySource = effective.energy !== null && effective.energy === existing.apiEnergy ? "api" : effective.energy !== null && effective.energy === update.localEnergy ? "local_essentia" : update.energySource;
-  update.valenceSource = effective.valence !== null && effective.valence === existing.apiMood ? "api" : effective.valence !== null && effective.valence === update.localMood ? "local_heuristic" : update.valenceSource;
-  update.danceabilitySource = effective.danceability !== null && effective.danceability === existing.apiDanceability ? "api" : effective.danceability !== null && effective.danceability === update.localDanceability ? "local_heuristic" : update.danceabilitySource;
-  update.acousticnessSource = effective.acousticness !== null && effective.acousticness === existing.apiAcousticness ? "api" : effective.acousticness !== null && effective.acousticness === update.localAcousticness ? "local_heuristic" : update.acousticnessSource;
+  update.energySource = sourceForEffectiveField(effective.energy, existing.apiEnergy, update.localEnergy) ?? update.energySource;
+  update.valenceSource = sourceForEffectiveField(effective.valence, existing.apiMood, update.localMood) ?? update.valenceSource;
+  update.danceabilitySource = sourceForEffectiveField(effective.danceability, existing.apiDanceability, update.localDanceability) ?? update.danceabilitySource;
+  update.acousticnessSource = sourceForEffectiveField(effective.acousticness, existing.apiAcousticness, update.localAcousticness) ?? update.acousticnessSource;
   update.effectiveEnergy = effective.energy;
   update.effectiveMood = effective.valence;
   update.effectiveDanceability = effective.danceability;
   update.effectiveAcousticness = effective.acousticness;
-  update.audioFeatureStatus = audioFeatureStatusFor(update);
   update.audioFeatureSource = isApiOwnedSource(existing.source, existing.audioFeatureSource)
+    && !options.preferLocal
     && Object.values(update).some((value) => value !== null && value !== undefined)
     ? "mixed"
     : "local_essentia";
+  update.audioFeatureStatus = audioFeatureStatusFor(update, {
+    preferLocal: options.preferLocal,
+    allowEstimated: options.allowEstimatedMoodAcousticness,
+  });
   update.source = existing.source && isApiOwnedSource(existing.source, existing.audioFeatureSource)
     ? existing.source
     : "Essentia local audio analysis";
@@ -837,6 +908,10 @@ async function saveLocalFeatures(track: any, result: LocalAudioFeatureResult, op
     `[LocalAudioFeatureEngine] ${trackLabel(track)} -> energy=${result.energy.toFixed(2)} mood=${result.valence.toFixed(2)} danceability=${result.danceability.toFixed(2)} acousticness=${result.acousticness.toFixed(2)} bpm=${result.tempo?.toFixed(1) || "n/a"} source=local_essentia scope=${result.analysisScope} confidence=${result.confidence.toFixed(2)}`,
   );
   debugLog(`[LocalAudioFeatureEngine] Persisted local audio features for track ${track.id}.`);
+  await logPostSaveVerification(track.id, {
+    preferLocal: options.preferLocal,
+    allowEstimated: options.allowEstimatedMoodAcousticness,
+  });
 }
 
 async function saveFailure(trackId: string, status: AudioFeatureStatus, scope: LocalAudioFeatureAnalysisScope, reason?: string) {
@@ -914,7 +989,7 @@ function apiAudioFeatureReprocessWhere() {
   };
 }
 
-export function localAudioFeatureWhere(reprocessLocal: boolean, reprocessApiWithLocal = false) {
+export function localAudioFeatureWhere(reprocessLocal: boolean, reprocessApiWithLocal = false, analysisScope?: string | null) {
   if (reprocessLocal) {
     return {
       AND: [
@@ -935,11 +1010,20 @@ export function localAudioFeatureWhere(reprocessLocal: boolean, reprocessApiWith
       { syncStatus: "active" },
       {
         OR: [
-          missingAudioFeatureTrackWhere(),
-          ...(reprocessApiWithLocal ? [apiAudioFeatureReprocessWhere()] : []),
+          {
+            AND: [
+              missingAudioFeatureTrackWhere(),
+              { NOT: { audioFeature: { is: localAttemptedAudioFeatureWhere() } } },
+            ],
+          },
+          ...(reprocessApiWithLocal ? [{
+            AND: [
+              apiAudioFeatureReprocessWhere(),
+              { NOT: localEssentiaAudioFeatureSuccessTrackWhere(analysisScope) },
+            ],
+          }] : []),
         ],
       },
-      { NOT: { audioFeature: { is: localAttemptedAudioFeatureWhere() } } },
     ],
   };
 }
@@ -965,6 +1049,15 @@ type LocalBackfillTrack = {
     apiMood?: number | null;
     apiDanceability?: number | null;
     apiAcousticness?: number | null;
+    localEnergy?: number | null;
+    localMood?: number | null;
+    localDanceability?: number | null;
+    localAcousticness?: number | null;
+    effectiveEnergy?: number | null;
+    effectiveMood?: number | null;
+    effectiveDanceability?: number | null;
+    effectiveAcousticness?: number | null;
+    audioFeatureAnalysisScope?: string | null;
   } | null;
 };
 
@@ -997,22 +1090,59 @@ function hasApiAudioFeatureAttempt(track: LocalBackfillTrack) {
 export function needsLocalAudioFeatureBackfill(track: LocalBackfillTrack, options: {
   reprocessLocal?: boolean;
   reprocessApiWithLocal?: boolean;
+  preferLocal?: boolean;
+  allowEstimated?: boolean;
+  analysisScope?: string | null;
 } = {}) {
   if (track.syncStatus && track.syncStatus !== "active") return false;
   if (!track.audioFeature) return true;
+  const effective = getEffectiveAudioFeatures(track, {
+    preferLocalAudioFeatures: options.preferLocal ?? true,
+    allowEstimated: options.allowEstimated ?? true,
+  });
+  const localSuccess = track.audioFeature.audioFeatureSource === "local_essentia"
+    && track.audioFeature.audioFeatureStatus === "success"
+    && effective.complete
+    && (!options.analysisScope || track.audioFeature.audioFeatureAnalysisScope === options.analysisScope);
+  if (!options.reprocessLocal && localSuccess) return false;
   const hasLocalAttempt = hasLocalAudioFeatureAttempt(track);
   if (!options.reprocessLocal && hasLocalAttempt) return false;
-  if (options.reprocessApiWithLocal && hasApiAudioFeatureAttempt(track)) return true;
-  const feature = track.audioFeature;
-  const requiredFinalFields = [feature.energy, feature.valence, feature.danceability, feature.tempo];
-  const source = String(feature.source || "");
-  const status = String(feature.audioFeatureStatus || "");
-  const isPlaceholder = ["not_found", "estimated", "Deezer BPM only"].includes(source)
-    || source.toLowerCase().includes("unknown mood")
-    || status === "no_data";
-  const hasFinalFeatures = requiredFinalFields.every((value) => value !== null && value !== undefined)
-    && !isPlaceholder;
-  return options.reprocessLocal ? hasLocalAttempt || !hasFinalFeatures : !hasFinalFeatures;
+  if (options.reprocessApiWithLocal && hasApiAudioFeatureAttempt(track) && !localSuccess) return true;
+  return options.reprocessLocal ? hasLocalAttempt || !effective.complete : !effective.complete;
+}
+
+function explainLocalAudioFeatureCandidate(track: any, options: {
+  reprocessLocal?: boolean;
+  reprocessApiWithLocal?: boolean;
+  preferLocal?: boolean;
+  allowEstimated?: boolean;
+  analysisScope?: string | null;
+}) {
+  const feature = track.audioFeature || {};
+  const effective = getEffectiveAudioFeatures(track, {
+    preferLocalAudioFeatures: options.preferLocal ?? true,
+    allowEstimated: options.allowEstimated ?? true,
+  });
+  const selected = needsLocalAudioFeatureBackfill(track, options);
+  return {
+    track: trackLabel(track),
+    audioFeatureStatus: feature.audioFeatureStatus ?? null,
+    audioFeatureSource: feature.audioFeatureSource ?? null,
+    audioFeatureAnalysisScope: feature.audioFeatureAnalysisScope ?? null,
+    energy: feature.energy ?? null,
+    mood: feature.valence ?? null,
+    danceability: feature.danceability ?? null,
+    acousticness: feature.acousticness ?? null,
+    tempo: feature.tempo ?? null,
+    effectiveEnergy: effective.energy,
+    effectiveMood: effective.mood,
+    effectiveDanceability: effective.danceability,
+    effectiveAcousticness: effective.acousticness,
+    effectiveTempo: effective.tempo,
+    effectiveComplete: effective.complete,
+    missingFields: effective.missingFields,
+    selected,
+  };
 }
 
 const localAudioFeatureTrackSelect = {
@@ -1064,12 +1194,36 @@ export const runLocalAudioFeatureEngine = async (options: SyncEngineOptions = {}
     const batchSize = resolveLimit(options.audioFeatureBatchSize, "AUDIO_FEATURE_BATCH_SIZE");
     const providerDelayMs = resolveDelayMs(options.providerDelayMs, 250);
     const allowEstimatedMoodAcousticness = metadataSettings.allowEstimated;
-    const reprocessLocal = boolSetting(options.reprocessLocalAudioFeatures, "LOCAL_AUDIO_FEATURE_REPROCESS", false)
-      || metadataSettings.reprocessApiWithLocal;
+    const reprocessLocal = boolSetting(options.reprocessLocalAudioFeatures, "LOCAL_AUDIO_FEATURE_REPROCESS", false);
     const analysisScope = metadataSettings.scope;
     console.log(`[LocalAudioFeatureEngine] Local audio feature analyzer selected: Essentia; scope=${analysisScope}.`);
-    const where = localAudioFeatureWhere(reprocessLocal, metadataSettings.reprocessApiWithLocal);
+    const where = localAudioFeatureWhere(reprocessLocal, metadataSettings.reprocessApiWithLocal, analysisScope);
     const candidateCount = await prisma.track.count({ where });
+    await safeTrackBatchIterator<any>({
+      engineName: "LocalAudioFeatureEngineCandidatePreview",
+      where,
+      orderBy: [{ addedAt: "desc" }, { id: "asc" }],
+      take: 10,
+      select: localAudioFeatureTrackSelect,
+      process: async (candidate) => {
+        const reason = explainLocalAudioFeatureCandidate(candidate, {
+          reprocessLocal,
+          reprocessApiWithLocal: metadataSettings.reprocessApiWithLocal,
+          preferLocal: metadataSettings.preferLocal,
+          allowEstimated: allowEstimatedMoodAcousticness,
+          analysisScope,
+        });
+        console.log("[LocalAudioFeatureEngine] Candidate reason:", reason);
+        if (reason.effectiveComplete && reason.selected) {
+          console.error("[LocalAudioFeatureEngine] BUG: selected completed local_essentia audio feature track.", {
+            track: reason.track,
+            audioFeatureStatus: reason.audioFeatureStatus,
+            audioFeatureSource: reason.audioFeatureSource,
+          });
+        }
+        return "skipped";
+      },
+    });
     const startedAt = Date.now();
     let alreadyAnalyzed = 0;
     let progressProcessed = 0;
@@ -1116,6 +1270,9 @@ export const runLocalAudioFeatureEngine = async (options: SyncEngineOptions = {}
           if (!freshTrack || !needsLocalAudioFeatureBackfill(freshTrack, {
             reprocessLocal,
             reprocessApiWithLocal: metadataSettings.reprocessApiWithLocal,
+            preferLocal: metadataSettings.preferLocal,
+            allowEstimated: allowEstimatedMoodAcousticness,
+            analysisScope,
           })) {
             alreadyAnalyzed += 1;
             debugLog(`[LocalAudioFeatureEngine] Skipping already analyzed track ${track.id} ${trackLabel(track)}.`);

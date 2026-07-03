@@ -662,7 +662,7 @@ export default function LibraryHealthPage() {
       const startResponse = await fetch("/api/sync/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ engine: "audio", providerMode }),
+        body: JSON.stringify({ engine: "audio", providerMode, libraryId: payload.libraryId, audioFeaturePartialBefore: data.before }),
       });
       const startData = await startResponse.json().catch(() => ({}));
       const suffix = startResponse.ok

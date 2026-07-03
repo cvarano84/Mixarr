@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readFile } from "fs/promises";
+import path from "path";
 import { bpmFailedTrackWhere, pendingBpmBackfillTrackWhere } from "./bpm";
 import {
   buildBpmTrackWhere,
@@ -134,5 +136,14 @@ describe("library health", () => {
     assert.equal(metadataTrackStatus("genres", { tags: [], genreStatus: null, tagsSyncedAt: new Date() }), "no_data");
     assert.equal(metadataTrackStatus("popularity", { popularityStatus: null, popularity: { provider: "not_found" } }), "no_data");
     assert.equal(metadataTrackStatus("popularity", { popularityStatus: null, popularity: { provider: "spotify", score: 0 } }), "success");
+  });
+
+  it("revalidates Library Health after audio-feature retry queueing and completion", async () => {
+    const retryRoute = await readFile(path.join(process.cwd(), "src/app/api/settings/library-health/audio-feature-retry/route.ts"), "utf8");
+    const syncStartRoute = await readFile(path.join(process.cwd(), "src/app/api/sync/start/route.ts"), "utf8");
+
+    assert.match(retryRoute, /revalidatePath\("\/settings\/library-health"\)/);
+    assert.match(syncStartRoute, /logPartialAudioFeatureRetryResult/);
+    assert.match(syncStartRoute, /revalidatePath\("\/settings\/library-health"\)/);
   });
 });

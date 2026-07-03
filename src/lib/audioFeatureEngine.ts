@@ -17,7 +17,7 @@ import {
 } from "./metrics";
 import { safeTrackBatchIterator, type EnrichmentRunSummary } from "./safeTrackBatch";
 import { sanitizeRequiredMetadataString } from "./metadataSanitizer";
-import { completeAudioFeatureWhere } from "./audioFeatures";
+import { completeAudioFeatureWhere, getEffectiveAudioFeatures } from "./audioFeatures";
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -47,14 +47,6 @@ function featureStatus(data: Record<string, unknown>) {
   return "no_data";
 }
 
-function firstNumber(...values: unknown[]) {
-  for (const value of values) {
-    const number = Number(value);
-    if (Number.isFinite(number)) return number;
-  }
-  return null;
-}
-
 function effectiveAudioFeatureData(existing: any, api: {
   energy: number | null;
   valence: number | null;
@@ -62,27 +54,29 @@ function effectiveAudioFeatureData(existing: any, api: {
   acousticness: number | null;
   loudness: number | null;
 }, preferLocal: boolean, allowEstimated: boolean) {
-  const localMood = allowEstimated ? existing?.localMood ?? null : null;
-  const localDanceability = allowEstimated ? existing?.localDanceability ?? null : null;
-  const localAcousticness = allowEstimated ? existing?.localAcousticness ?? null : null;
-  const effective = preferLocal
-    ? {
-      energy: firstNumber(existing?.localEnergy, api.energy),
-      valence: firstNumber(localMood, api.valence),
-      danceability: firstNumber(localDanceability, api.danceability),
-      acousticness: firstNumber(localAcousticness, api.acousticness),
-      loudness: firstNumber(existing?.localLoudness, api.loudness),
-    }
-    : {
-      energy: firstNumber(api.energy, existing?.localEnergy),
-      valence: firstNumber(api.valence, localMood),
-      danceability: firstNumber(api.danceability, localDanceability),
-      acousticness: firstNumber(api.acousticness, localAcousticness),
-      loudness: firstNumber(api.loudness, existing?.localLoudness),
-    };
+  const merged = {
+    ...existing,
+    apiEnergy: api.energy,
+    apiMood: api.valence,
+    apiDanceability: api.danceability,
+    apiAcousticness: api.acousticness,
+    apiLoudness: api.loudness,
+    audioFeatureStatus: "success",
+    audioFeatureSource: existing?.audioFeatureSource === "local_essentia" ? "mixed" : existing?.audioFeatureSource || "api",
+  };
+  const effective = getEffectiveAudioFeatures({ audioFeature: merged }, {
+    preferLocalAudioFeatures: preferLocal,
+    allowEstimated,
+  });
 
   return {
-    ...effective,
+    energy: effective.energy,
+    valence: effective.valence,
+    danceability: effective.danceability,
+    acousticness: effective.acousticness,
+    loudness: preferLocal
+      ? (existing?.localLoudness ?? api.loudness ?? null)
+      : (api.loudness ?? existing?.localLoudness ?? null),
     source: api.energy !== null || api.valence !== null || api.danceability !== null || api.acousticness !== null
       ? existing?.localEnergy !== null && existing?.localEnergy !== undefined ? "mixed" : "api"
       : existing?.audioFeatureSource || null,
@@ -240,9 +234,9 @@ export const runAudioFeatureEngine = async (options: SyncEngineOptions = {}): Pr
             lastUpdated: new Date(),
           };
           data.energySource = effective.energy !== null && effective.energy === finalEnergy ? "api" : effective.energy !== null && effective.energy === track.audioFeature?.localEnergy ? "local_essentia" : data.energySource;
-          data.valenceSource = effective.valence !== null && effective.valence === finalValence ? "api" : effective.valence !== null && effective.valence === track.audioFeature?.localMood ? "local_heuristic" : data.valenceSource;
-          data.danceabilitySource = effective.danceability !== null && effective.danceability === finalDanceability ? "api" : effective.danceability !== null && effective.danceability === track.audioFeature?.localDanceability ? "local_heuristic" : data.danceabilitySource;
-          data.acousticnessSource = effective.acousticness !== null && effective.acousticness === finalAcousticness ? "api" : effective.acousticness !== null && effective.acousticness === track.audioFeature?.localAcousticness ? "local_heuristic" : data.acousticnessSource;
+          data.valenceSource = effective.valence !== null && effective.valence === finalValence ? "api" : effective.valence !== null && effective.valence === track.audioFeature?.localMood ? "local_essentia" : data.valenceSource;
+          data.danceabilitySource = effective.danceability !== null && effective.danceability === finalDanceability ? "api" : effective.danceability !== null && effective.danceability === track.audioFeature?.localDanceability ? "local_essentia" : data.danceabilitySource;
+          data.acousticnessSource = effective.acousticness !== null && effective.acousticness === finalAcousticness ? "api" : effective.acousticness !== null && effective.acousticness === track.audioFeature?.localAcousticness ? "local_essentia" : data.acousticnessSource;
 
           await prisma.audioFeature.upsert({
             where: { trackId: track.id },
