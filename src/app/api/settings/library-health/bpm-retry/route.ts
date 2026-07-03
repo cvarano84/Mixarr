@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
-import { bpmTooShortTrackWhere, missingEffectiveBpmTrackWhere } from "@/lib/bpm";
+import { bpmRetryEligibilityTrackWhere } from "@/lib/bpm";
 import { bpmHealthFilterWhere, isBpmHealthFilter } from "@/lib/libraryHealth";
 
 const requestSchema = z.object({
@@ -39,8 +39,7 @@ export async function POST(request: Request) {
           library: { ...(libraryId ? { id: libraryId } : {}), server: { userId } },
         },
         targetWhere,
-        ...(force || providerMode === "force_local" ? [] : [missingEffectiveBpmTrackWhere()]),
-        ...(force || providerMode === "force_local" ? [] : [{ NOT: bpmTooShortTrackWhere() }]),
+        bpmRetryEligibilityTrackWhere({ force, providerMode }),
       ],
     };
     const matching = await prisma.track.findMany({

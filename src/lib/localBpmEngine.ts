@@ -5,12 +5,14 @@ import os from "os";
 import path from "path";
 import prisma from "./prisma";
 import {
-  bpmBackfillCandidateTrackWhere,
+  bpmBackfillTrackWhere,
   bpmAnalyzerFailedTrackWhere,
   bpmExtractionFailedTrackWhere,
   bpmFailedTrackWhere,
   bpmNoDataTrackWhere,
   effectiveBpmTrackWhere,
+  explainBpmBackfillEligibility,
+  hasLocalEssentiaBpmSuccess,
   missingEffectiveBpmTrackWhere,
   pendingBpmBackfillTrackWhere,
   type BpmAnalysisStatus,
@@ -1402,29 +1404,36 @@ function hasExistingAubioTempo(track: any) {
   return isAubioTempoSource(track.audioFeature?.tempoSource) && validBpm(track.audioFeature?.tempo) !== null;
 }
 
-function bpmBackfillWhere(
-  includeAubioReprocess = false,
-  retryNoDataFailed = false,
-  reprocessApiWithLocal = false,
-) {
-  return {
-    AND: [
-      { syncStatus: "active" },
-      {
-        OR: [
-          bpmBackfillCandidateTrackWhere({ includeAubioReprocess, retryNoDataFailed }),
-          ...(reprocessApiWithLocal ? [{ apiBpm: { gt: 0 } }] : []),
-        ],
-      },
-    ],
-  };
-}
+const bpmProcessingTrackSelect = {
+  id: true,
+  title: true,
+  plexId: true,
+  ratingKey: true,
+  duration: true,
+  bpm: true,
+  apiBpm: true,
+  localBpm: true,
+  effectiveBpm: true,
+  bpmSource: true,
+  bpmConfidence: true,
+  bpmAnalysisStatus: true,
+  artist: { select: { title: true } },
+  library: {
+    select: {
+      id: true,
+      name: true,
+      server: { select: { uri: true, accessToken: true } },
+    },
+  },
+  audioFeature: { select: { tempo: true, tempoSource: true, tempoConfidence: true } },
+} as const;
 
-async function logBpmBackfillQueueStats(includeAubioReprocess: boolean, retryNoDataFailed: boolean) {
-  const candidateWhere = bpmBackfillCandidateTrackWhere({
-    includeAubioReprocess,
-    retryNoDataFailed,
-  });
+async function logBpmBackfillQueueStats(
+  where: ReturnType<typeof bpmBackfillTrackWhere>,
+  includeAubioReprocess: boolean,
+  retryNoDataFailed: boolean,
+  reprocessApiWithLocal: boolean,
+) {
   const active = { syncStatus: "active" } as const;
 
   const [
@@ -1446,12 +1455,43 @@ async function logBpmBackfillQueueStats(includeAubioReprocess: boolean, retryNoD
     () => prisma.track.count({ where: { AND: [active, bpmFailedTrackWhere()] } }),
     () => prisma.track.count({ where: { AND: [active, bpmExtractionFailedTrackWhere()] } }),
     () => prisma.track.count({ where: { AND: [active, bpmAnalyzerFailedTrackWhere()] } }),
-    () => prisma.track.count({ where: { AND: [active, candidateWhere] } }),
+    () => prisma.track.count({ where }),
   ], resolveDbJobConcurrency());
 
   console.log(
-    `[LocalBpmEngine] Queue status: total=${total}, withBpm=${withBpm}, missing=${missing}, pending=${pending}, noData=${noData}, failed=${failed}, extractionFailed=${extractionFailed}, analyzerFailed=${analyzerFailed}, candidates=${candidates}, retryNoDataFailed=${retryNoDataFailed ? "on" : "off"}, reprocessAubio=${includeAubioReprocess ? "on" : "off"}.`,
+    `[LocalBpmEngine] Queue status: total=${total}, withBpm=${withBpm}, missing=${missing}, pending=${pending}, noData=${noData}, failed=${failed}, extractionFailed=${extractionFailed}, analyzerFailed=${analyzerFailed}, candidates=${candidates}, retryNoDataFailed=${retryNoDataFailed ? "on" : "off"}, reprocessAubio=${includeAubioReprocess ? "on" : "off"}, reprocessApi=${reprocessApiWithLocal ? "on" : "off"}.`,
   );
+}
+
+async function logInitialBpmCandidateReasons(
+  where: ReturnType<typeof bpmBackfillTrackWhere>,
+  options: {
+    includeAubioReprocess: boolean;
+    retryNoDataFailed: boolean;
+    reprocessApiWithLocal: boolean;
+  },
+) {
+  await safeTrackBatchIterator<any>({
+    engineName: "LocalBpmEngine candidate logger",
+    where,
+    orderBy: [{ addedAt: "desc" }, { id: "asc" }],
+    take: 10,
+    select: bpmProcessingTrackSelect,
+    process: async (track) => {
+      const explanation = explainBpmBackfillEligibility(track, options);
+      console.log(
+        `[LocalBpmEngine] Candidate reason for ${track.artist.title} - ${track.title}: ` +
+        `bpm=${explanation.bpm ?? "null"} localBpm=${explanation.localBpm ?? "null"} apiBpm=${explanation.apiBpm ?? "null"} ` +
+        `bpmSource=${explanation.bpmSource ?? "null"} bpmAnalysisStatus=${explanation.bpmAnalysisStatus ?? "null"} ` +
+        `audioFeatureTempo=${explanation.audioFeatureTempo ?? "null"} audioFeatureTempoSource=${explanation.audioFeatureTempoSource ?? "null"} ` +
+        `effectiveBpm=${explanation.effectiveBpm ?? "null"} selected=${explanation.selected} reason=${explanation.reason}`,
+      );
+      if (hasLocalEssentiaBpmSuccess(track)) {
+        console.error("[LocalBpmEngine] BUG: selected track already has local_essentia success BPM.");
+      }
+      return "processed";
+    },
+  });
 }
 
 export const runLocalBpmEngine = async (options: SyncEngineOptions = {}) => {
@@ -1486,46 +1526,51 @@ export const runLocalBpmEngine = async (options: SyncEngineOptions = {}) => {
       console.warn(`[LocalBpmEngine] Local analyzer fallback: ${localAnalyzer.fallbackReason}; using ${localAnalyzer.label}.`);
     }
 
-    await logBpmBackfillQueueStats(includeAubioReprocess, retryNoDataFailed);
-    const where = bpmBackfillWhere(includeAubioReprocess, retryNoDataFailed, metadataSettings.reprocessApiWithLocal);
+    const eligibilityOptions = {
+      includeAubioReprocess,
+      retryNoDataFailed,
+      reprocessApiWithLocal: metadataSettings.reprocessApiWithLocal,
+    };
+    const where = bpmBackfillTrackWhere(eligibilityOptions);
+    await logBpmBackfillQueueStats(where, includeAubioReprocess, retryNoDataFailed, metadataSettings.reprocessApiWithLocal);
     const candidateCount = await prisma.track.count({ where });
     console.log(`[LocalBpmEngine] Found ${candidateCount} tracks needing BPM backfill.`);
+    await logInitialBpmCandidateReasons(where, eligibilityOptions);
     engineBatchSize.observe({ engine: ENGINE }, Math.min(candidateCount, batchSize || candidateCount));
 
     summary = await safeTrackBatchIterator<any>({
       engineName: "LocalBpmEngine",
       where,
       orderBy: [{ addedAt: "desc" }, { id: "asc" }],
-      select: {
-        id: true,
-        title: true,
-        plexId: true,
-        ratingKey: true,
-        duration: true,
-        bpm: true,
-        apiBpm: true,
-        localBpm: true,
-        effectiveBpm: true,
-        bpmSource: true,
-        bpmConfidence: true,
-        artist: { select: { title: true } },
-        library: {
-          select: {
-            id: true,
-            name: true,
-            server: { select: { uri: true, accessToken: true } },
-          },
-        },
-        audioFeature: { select: { tempo: true, tempoSource: true, tempoConfidence: true } },
-      },
+      select: bpmProcessingTrackSelect,
       ...(batchSize ? { take: batchSize } : {}),
       process: async (track) => {
-      let outcome: "success" | "not_found" | "rate_limited" | "error" = "success";
-      const endTimer = trackDurationSeconds.startTimer({ engine: ENGINE });
-      const preserveExistingAubio = localAnalyzer?.name === "essentia" && hasExistingAubioTempo(track);
-      try {
-        let deezerRateLimited = false;
-        let deezerBpm = null;
+        const currentTrack = await prisma.track.findFirst({
+          where: { AND: [{ id: track.id }, where] },
+          select: bpmProcessingTrackSelect,
+        });
+        if (!currentTrack) {
+          const latest = await prisma.track.findUnique({
+            where: { id: track.id },
+            select: bpmProcessingTrackSelect,
+          });
+          if (latest) {
+            const explanation = explainBpmBackfillEligibility(latest, eligibilityOptions);
+            console.log(
+              `[LocalBpmEngine] Skipping ${latest.artist.title} - ${latest.title}; no longer eligible for BPM backfill. ` +
+              `effectiveBpm=${explanation.effectiveBpm ?? "null"} bpmSource=${explanation.bpmSource ?? "null"} ` +
+              `bpmAnalysisStatus=${explanation.bpmAnalysisStatus ?? "null"} reason=${explanation.reason}`,
+            );
+          }
+          return "skipped";
+        }
+        track = currentTrack;
+        let outcome: "success" | "not_found" | "rate_limited" | "error" = "success";
+        const endTimer = trackDurationSeconds.startTimer({ engine: ENGINE });
+        const preserveExistingAubio = localAnalyzer?.name === "essentia" && hasExistingAubioTempo(track);
+        try {
+          let deezerRateLimited = false;
+          let deezerBpm = null;
 
         if (metadataSettings.api) {
           try {
