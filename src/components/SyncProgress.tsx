@@ -211,7 +211,7 @@ export default function SyncProgress() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: "1.5rem" }}>
         
         {/* Plex Metadata Sync */}
-        <div style={{ background: "var(--bg-base)", padding: "1rem", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+        <div style={syncCardStyle}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
             <span style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: "0.5rem" }}><Database size={16} color="var(--text-secondary)"/> Plex Library</span>
             {status.metadata.isSyncing ? (
@@ -228,11 +228,11 @@ export default function SyncProgress() {
         </div>
 
         {/* Audio Features Sync */}
-        <div style={{ background: "var(--bg-base)", padding: "1rem", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+        <div style={syncCardStyle}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
             <span style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: "0.5rem" }}><Music size={16} color="var(--accent-yellow)"/> Audio Features</span>
             {starting === 'audio' ? <Loader2 size={16} className="animate-spin" /> : (
-              <button onClick={() => startSync('audio')} style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--text-secondary)" }} title="Start Audio Features Sync">
+              <button onClick={() => startSync('audio')} style={syncActionButtonStyle} title="Run audio feature sync" aria-label="Run audio feature sync">
                 <Play size={16} />
               </button>
             )}
@@ -241,11 +241,11 @@ export default function SyncProgress() {
         </div>
 
         {/* Popularity Sync */}
-        <div style={{ background: "var(--bg-base)", padding: "1rem", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+        <div style={syncCardStyle}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
             <span style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: "0.5rem" }}><Star size={16} color="var(--accent-primary)"/> Popularity Scores</span>
             {starting === 'popularity' ? <Loader2 size={16} className="animate-spin" /> : (
-              <button onClick={() => startSync('popularity')} style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--text-secondary)" }} title="Start Popularity Sync">
+              <button onClick={() => startSync('popularity')} style={syncActionButtonStyle} title="Run popularity sync" aria-label="Run popularity sync">
                 <Play size={16} />
               </button>
             )}
@@ -254,11 +254,11 @@ export default function SyncProgress() {
         </div>
 
         {/* Track Genres Sync */}
-        <div style={{ background: "var(--bg-base)", padding: "1rem", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+        <div style={syncCardStyle}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
             <span style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: "0.5rem" }}><Tag size={16} color="#10b981"/> Track Genres</span>
             {starting === 'tags' ? <Loader2 size={16} className="animate-spin" /> : (
-              <button onClick={() => startSync('tags')} style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--text-secondary)" }} title="Start Genre Sync">
+              <button onClick={() => startSync('tags')} style={syncActionButtonStyle} title="Run genre sync" aria-label="Run genre sync">
                 <Play size={16} />
               </button>
             )}
@@ -270,18 +270,18 @@ export default function SyncProgress() {
           )}
           <div
             title="Track genre enrichment tries Deezer, MusicBrainz, opt-in Discogs/Spotify, then Last.fm as the final fallback."
-            style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: "0.5rem", display: "flex", alignItems: "center", gap: "0.25rem" }}
+            style={genreHelperStyle}
           >
-            <Info size={11} /> Uses <code style={{ background: "rgba(255,255,255,0.05)", padding: "0 0.25rem", borderRadius: "3px" }}>Deezer</code>, <code style={{ background: "rgba(255,255,255,0.05)", padding: "0 0.25rem", borderRadius: "3px" }}>MusicBrainz</code>; optional <code style={{ background: "rgba(255,255,255,0.05)", padding: "0 0.25rem", borderRadius: "3px" }}>Discogs/Spotify</code>; <code style={{ background: "rgba(255,255,255,0.05)", padding: "0 0.25rem", borderRadius: "3px" }}>Last.fm</code> fallback
+            <Info size={11} style={{ flex: "0 0 auto" }} /> Used for genre-aware playlist filters.
           </div>
         </div>
 
         {/* BPM Sync */}
-        <div style={{ background: "var(--bg-base)", padding: "1rem", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+        <div style={syncCardStyle}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
             <span style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: "0.5rem" }}><Activity size={16} color="#ef4444"/> BPM / Tempo</span>
             {starting === 'bpm' ? <Loader2 size={16} className="animate-spin" /> : (
-              <button onClick={() => startSync('bpm')} style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--text-secondary)" }} title="Start Local BPM Backfill">
+              <button onClick={() => startSync('bpm')} style={syncActionButtonStyle} title="Run BPM sync" aria-label="Run BPM sync">
                 <Play size={16} />
               </button>
             )}
@@ -440,6 +440,40 @@ const modalBackdropStyle = {
   justifyContent: "center",
   padding: "1rem",
   zIndex: 50,
+};
+
+const syncCardStyle = {
+  background: "var(--bg-base)",
+  padding: "1rem",
+  borderRadius: "var(--radius-md)",
+  border: "1px solid var(--border-subtle)",
+  minHeight: "118px",
+  minWidth: 0,
+  overflow: "hidden",
+};
+
+const syncActionButtonStyle = {
+  background: "transparent",
+  border: "none",
+  cursor: "pointer",
+  color: "var(--text-secondary)",
+  padding: "0.25rem",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  borderRadius: "var(--radius-sm)",
+};
+
+const genreHelperStyle = {
+  fontSize: "0.68rem",
+  color: "var(--text-muted)",
+  marginTop: "0.5rem",
+  display: "-webkit-box",
+  WebkitLineClamp: 1,
+  WebkitBoxOrient: "vertical" as const,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  lineHeight: 1.35,
 };
 
 const modalStyle = {

@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.1.0 - Dashboard Cleanup & v2.0.0 Preview
+
+- Cleaned up dashboard enrichment card layouts.
+- Fixed Track Genres card text overflow.
+- Removed redundant Data Enrichment dashboard section.
+- Added v2.0.0 Coming Soon preview section.
+- Added guidance that enrichment tools are available from each dashboard card.
+- Improved dashboard polish and mobile layout.
+
 ## v1.0.5 - Metadata Reliability & Library Health Polish
 
 - Fixed partial audio feature retry not clearing after successful local Essentia analysis.

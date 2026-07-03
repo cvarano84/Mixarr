@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import axios from "axios";
-import { Loader2, Server, Library as LibraryIcon, RefreshCw, CheckCircle2 } from "lucide-react";
+import { Loader2, Server, Library as LibraryIcon, RefreshCw } from "lucide-react";
 
 export default function LibrarySelector() {
   const [servers, setServers] = useState<any[]>([]);
@@ -105,48 +105,6 @@ export default function LibrarySelector() {
             </div>
           ) : (
             <p style={{ color: "var(--text-muted)", fontSize: "0.875rem", margin: 0 }}>No music libraries synced yet. Click 'Find Music Libraries' above.</p>
-          )}
-
-          {server.libraries && server.libraries.length > 0 && (
-            <div style={{ marginTop: "1.5rem", paddingTop: "1.5rem", borderTop: "1px solid var(--border-subtle)" }}>
-              <h4 style={{ fontSize: "1rem", margin: "0 0 1rem 0" }}>Data Enrichment</h4>
-              <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
-                <button
-                  onClick={async () => {
-                    try {
-                      await axios.post("/api/sync/start", { engine: "popularity" });
-                      alert("Popularity sync started in the background! Check Docker logs.");
-                    } catch(e) {
-                      alert("Failed to start popularity sync");
-                    }
-                  }}
-                  style={{
-                    background: "var(--bg-base)", border: "1px solid var(--accent-primary)", color: "var(--accent-primary)", padding: "0.5rem 1rem", borderRadius: "var(--radius-md)", cursor: "pointer", display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.875rem", fontWeight: 600
-                  }}
-                >
-                  Sync Popularity Data (Deezer/Last.fm/Spotify)
-                </button>
-
-                <button
-                  onClick={async () => {
-                    try {
-                      await axios.post("/api/sync/start", { engine: "audio" });
-                      alert("Audio Features sync started in the background. Processed/skipped/failed counts will appear in Sync Center; check logs for any corrupt track IDs.");
-                    } catch(e) {
-                      alert("Failed to start audio feature sync");
-                    }
-                  }}
-                  style={{
-                    background: "var(--bg-base)", border: "1px solid var(--accent-yellow)", color: "var(--accent-yellow)", padding: "0.5rem 1rem", borderRadius: "var(--radius-md)", cursor: "pointer", display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.875rem", fontWeight: 600
-                  }}
-                >
-                  Sync Energy & Mood (Spotify)
-                </button>
-              </div>
-              <p style={{ color: "var(--text-muted)", fontSize: "0.75rem", marginTop: "0.75rem" }}>
-                These background tasks analyze your 30k+ tracks via external APIs to unlock advanced playlist filtering. They respect strict rate limits.
-              </p>
-            </div>
           )}
         </div>
       ))}

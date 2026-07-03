@@ -1,12 +1,57 @@
 import styles from "./page.module.css";
 import Link from "next/link";
-import { HeartPulse, ListMusic, Wand2 } from "lucide-react";
+import { BrainCircuit, Fingerprint, Gauge, HeartPulse, ListMusic, Radio, Repeat2, SlidersHorizontal, Wand2 } from "lucide-react";
 import LibrarySelector from "@/components/LibrarySelector";
 import SyncProgress from "@/components/SyncProgress";
 import PlexLoginButton from "@/components/PlexLoginButton";
 import { cookies } from "next/headers";
 import prisma from "@/lib/prisma";
 import { getLibraryHealth } from "@/lib/libraryHealth";
+
+const previewFeatures = [
+  {
+    title: "Smart Mix Builder",
+    description: "Build playlists from a vibe, mood, energy level, BPM range, genre blend, or listening goal.",
+    examples: ["Late-night drive", "Gym mode", "Deep cuts only"],
+    icon: SlidersHorizontal,
+    badge: "Planned",
+  },
+  {
+    title: "AI DJ Flow",
+    description: "Create playlists with smooth pacing, energy curves, artist spacing, and better track-to-track flow.",
+    examples: ["Warm-up to peak", "BPM-aware order", "Mood transitions"],
+    icon: BrainCircuit,
+    badge: "v2.0.0",
+  },
+  {
+    title: "Infinite Radio Stations",
+    description: "Generate living stations that keep refreshing based on your library, filters, and listening preferences.",
+    examples: ["My Rock Radio", "Chill Night Station", "Discovery Radio"],
+    icon: Radio,
+    badge: "Concept",
+  },
+  {
+    title: "Playlist Intelligence Score",
+    description: "Preview playlist quality before saving with scoring for variety, flow, energy balance, and repeat risk.",
+    examples: ["Flow score", "Genre spread", "Artist variety"],
+    icon: Gauge,
+    badge: "Preview",
+  },
+  {
+    title: "Music DNA",
+    description: "Visualize your library by energy, mood, BPM, genre, popularity, and audio feature coverage.",
+    examples: ["Mood map", "BPM distribution", "Genre heatmap"],
+    icon: Fingerprint,
+    badge: "Planned",
+  },
+  {
+    title: "Anti-Repeat Engine",
+    description: "Prevent the same songs, artists, or albums from appearing too often.",
+    examples: ["Track cooldown", "Artist cooldown", "Discovery boost"],
+    icon: Repeat2,
+    badge: "Concept",
+  },
+];
 
 export default async function Home() {
   const cookieStore = cookies();
@@ -75,6 +120,39 @@ export default async function Home() {
               </div>
             </>;
           })()}
+          <section className={styles.comingSoonSection} aria-labelledby="coming-soon-v2">
+            <div className={styles.comingSoonHeader}>
+              <div>
+                <span className={styles.kicker}>Preview</span>
+                <h3 id="coming-soon-v2">Coming Soon in v2.0.0</h3>
+                <p>Next-level playlist intelligence is coming to Mixarr.</p>
+              </div>
+              <span className={styles.versionPill}>v2.0.0</span>
+            </div>
+            <p className={styles.enrichmentNote}>
+              Data enrichment controls have moved into their matching dashboard cards. Use the play button on each card to run or retry BPM, genres, popularity, or audio feature processing.
+            </p>
+            <div className={styles.previewGrid}>
+              {previewFeatures.map((feature) => {
+                const Icon = feature.icon;
+                return (
+                  <article key={feature.title} className={styles.previewCard}>
+                    <div className={styles.previewCardTop}>
+                      <span className={styles.previewIcon}><Icon size={18} /></span>
+                      <span className={styles.previewBadge}>{feature.badge}</span>
+                    </div>
+                    <h4>{feature.title}</h4>
+                    <p>{feature.description}</p>
+                    <div className={styles.previewExamples}>
+                      {feature.examples.map((example) => (
+                        <span key={example}>{example}</span>
+                      ))}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
           <div className={styles.sectionHeader}>
             <h3>Your Plex Servers</h3>
           </div>
