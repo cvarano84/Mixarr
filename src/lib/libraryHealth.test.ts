@@ -146,7 +146,9 @@ describe("library health", () => {
     const syncStartRoute = await readFile(path.join(process.cwd(), "src/app/api/sync/start/route.ts"), "utf8");
 
     assert.match(retryRoute, /revalidatePath\("\/settings\/library-health"\)/);
+    assert.doesNotMatch(retryRoute, /audioFeatureAnalyzedAt:\s*null/);
     assert.match(syncStartRoute, /logPartialAudioFeatureRetryResult/);
+    assert.match(syncStartRoute, /preferLocalAudioFeatures:\s*true/);
     assert.match(syncStartRoute, /revalidatePath\("\/settings\/library-health"\)/);
   });
 

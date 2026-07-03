@@ -73,7 +73,6 @@ export async function POST(request: Request) {
         data: {
           audioFeatureStatus: "pending",
           audioFeatureFailureReason: null,
-          audioFeatureAnalyzedAt: null,
         },
       });
     }

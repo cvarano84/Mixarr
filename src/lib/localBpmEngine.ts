@@ -1,6 +1,6 @@
 import { spawn } from "child_process";
 import { existsSync } from "fs";
-import { mkdir, mkdtemp, rename, rm, stat, writeFile } from "fs/promises";
+import { mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from "fs/promises";
 import os from "os";
 import path from "path";
 import prisma from "./prisma";
@@ -51,6 +51,8 @@ const minimumSampleBytes = positiveNumber(process.env.LOCAL_BPM_MIN_SAMPLE_BYTES
 const minimumSampleDurationSeconds = positiveNumber(process.env.LOCAL_BPM_MIN_SAMPLE_SECONDS, 10);
 const retryDays = Number(process.env.LOCAL_BPM_RETRY_DAYS || 14);
 const confidenceThreshold = Number(process.env.LOCAL_BPM_CONFIDENCE_THRESHOLD || 0.75);
+const localBpmAnalysisTimeoutSeconds = positiveNumber(process.env.LOCAL_BPM_ANALYSIS_TIMEOUT_SECONDS, 300);
+const localBpmConcurrency = Math.max(1, Math.floor(positiveNumber(process.env.LOCAL_BPM_CONCURRENCY, 1)));
 const ffmpegPath = process.env.LOCAL_BPM_FFMPEG_PATH || "ffmpeg";
 const ffprobePath = process.env.LOCAL_BPM_FFPROBE_PATH || "ffprobe";
 const aubioPath = process.env.LOCAL_BPM_AUBIO_PATH || "aubio";
@@ -790,7 +792,7 @@ async function extractAudioSample(
       const sampleBuffer = await runCommandToBuffer(
         ffmpegPath,
         buildFfmpegSampleArgs(source, startSeconds, durationSeconds, attempt.preInputSeek),
-        Math.max(60000, durationSeconds * 2000),
+        Math.max(localBpmAnalysisTimeoutSeconds * 1000, durationSeconds * 2000),
         maxWavOutputBytes(durationSeconds),
       );
 
@@ -1192,8 +1194,29 @@ async function analyzeTrackLocally(
 
     return analyzeTrackWindows(track, tempDir, analyzer);
   } finally {
+    const removedBytes = await directorySize(tempDir).catch(() => 0);
     await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+    console.log(`[LocalBpmEngine] Temp cleanup for track ${trackLabel(track)} removed ${formatBytes(removedBytes)}.`);
   }
+}
+
+async function directorySize(dirPath: string): Promise<number> {
+  let total = 0;
+  const entries = await readdir(dirPath, { withFileTypes: true });
+  for (const entry of entries) {
+    const entryPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      total += await directorySize(entryPath);
+    } else if (entry.isFile()) {
+      total += (await stat(entryPath)).size;
+    }
+  }
+  return total;
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 MB";
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function canonicalBpmSource(source: string) {
@@ -1535,6 +1558,9 @@ export const runLocalBpmEngine = async (options: SyncEngineOptions = {}) => {
     console.log(
       `[LocalBpmEngine] Local analyzer selected: ${localAnalyzer?.label || "disabled"} (requested ${localAnalyzerMode}); scope=${localAnalysisScope}; reprocessAubio=${includeAubioReprocess ? "on" : "off"}; reprocessNoDataFailed=${retryNoDataFailed ? "on" : "off"}.`,
     );
+    if (localAnalysisScope === "whole_track") {
+      console.log(`[LocalBpmEngine] Whole-track mode uses concurrency=${localBpmConcurrency}.`);
+    }
     if (localAnalyzer?.fallbackReason) {
       console.warn(`[LocalBpmEngine] Local analyzer fallback: ${localAnalyzer.fallbackReason}; using ${localAnalyzer.label}.`);
     }

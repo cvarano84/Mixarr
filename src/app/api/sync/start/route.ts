@@ -39,6 +39,7 @@ export async function POST(req: Request) {
       ...(engine === "audio" && (providerMode === "local_only" || providerMode === "force_local") ? {
         enableApiAudioFeatures: false,
         enableLocalAudioFeatures: true,
+        preferLocalAudioFeatures: true,
         reprocessApiAudioFeaturesWithLocal: providerMode === "force_local",
       } : {}),
     };

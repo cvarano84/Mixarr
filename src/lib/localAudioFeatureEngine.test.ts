@@ -149,6 +149,35 @@ describe("LocalAudioFeatureEngine backfill predicates", () => {
     }), true);
   });
 
+  it("retries incomplete partial rows even when a previous local attempt timestamp exists", () => {
+    assert.equal(needsLocalAudioFeatureBackfill({
+      syncStatus: "active",
+      audioFeature: {
+        localEnergy: 0.71,
+        localMood: null,
+        localDanceability: 0.62,
+        localAcousticness: 0.21,
+        energy: 0.71,
+        valence: null,
+        danceability: 0.62,
+        acousticness: 0.21,
+        tempo: 120,
+        source: "Essentia local audio analysis",
+        audioFeatureSource: "local_essentia",
+        audioFeatureStatus: "partial",
+        audioFeatureAnalyzedAt: new Date(),
+        audioFeatureAnalysisScope: "whole_track",
+        energySource: "local_essentia",
+        valenceSource: "local_essentia",
+        danceabilitySource: "local_essentia",
+        acousticnessSource: "local_essentia",
+      },
+    }, {
+      preferLocal: true,
+      analysisScope: "whole_track",
+    }), true);
+  });
+
   it("does not need backfill after local retry fills an existing partial row", () => {
     assert.equal(needsLocalAudioFeatureBackfill({
       syncStatus: "active",
@@ -183,10 +212,12 @@ describe("LocalAudioFeatureEngine backfill predicates", () => {
     }), false);
   });
 
-  it("uses local-attempt exclusion in the missing query so restarts resume remaining tracks", () => {
+  it("uses terminal local-attempt exclusion in the missing query so restarts resume remaining tracks", () => {
     const where = JSON.stringify(localAudioFeatureWhere(false, false, "whole_track"));
     assert.match(where, /missingAudioFeature|audioFeature|NOT/);
     assert.match(where, /audioFeatureAnalyzedAt/);
+    assert.match(where, /no_data/);
+    assert.match(where, /too_short/);
     assert.match(where, /local_essentia/);
     assert.match(where, /local_heuristic/);
     assert.doesNotMatch(where, /apiAudioFeatureReprocessWhere/);

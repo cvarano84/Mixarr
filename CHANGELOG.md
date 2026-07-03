@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.0.5 - Metadata Reliability & Library Health Polish
+
+- Fixed partial audio feature retry not clearing after successful local Essentia analysis.
+- Fixed retry queues replaying already-completed tracks.
+- Improved BPM and audio feature candidate selection consistency.
+- Added post-save verification logging for local metadata analysis.
+- Improved Library Health count/filter accuracy.
+- Improved whole-track Essentia temp cleanup and worker safety.
+- Added separate too-short status handling.
+- Added GitHub repository link.
+- Improved provider/status breakdowns in Dashboard and Library Health.
+
 ## v1.0.4 - Local/API Metadata Controls
 
 - Added settings to enable or disable API BPM lookup.
