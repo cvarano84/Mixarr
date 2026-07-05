@@ -1188,11 +1188,15 @@ async function analyzeTrackLocally(
   const tempDir = await createBpmTempDir();
 
   try {
+    // We must await here so that the finally cleanup runs after the analysis
+    // finishes writing its WAV samples. A bare `return promise` would let the
+    // finally delete the temp dir first, and the still-running extraction would
+    // re-create and fill it with nothing left to clean it up afterward.
     if (analysisScope === "whole_track") {
-      return analyzeTrackWholeTrack(track, tempDir, analyzer);
+      return await analyzeTrackWholeTrack(track, tempDir, analyzer);
     }
 
-    return analyzeTrackWindows(track, tempDir, analyzer);
+    return await analyzeTrackWindows(track, tempDir, analyzer);
   } finally {
     const removedBytes = await directorySize(tempDir).catch(() => 0);
     await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);

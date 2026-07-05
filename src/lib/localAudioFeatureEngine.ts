@@ -674,11 +674,15 @@ async function analyzeTrackLocally(track: any, scope: LocalAudioFeatureAnalysisS
   const tempDir = await createTempDir();
 
   try {
+    // We must await here so that the finally cleanup runs after the analysis
+    // finishes writing its WAV samples. A bare `return promise` would let the
+    // finally delete the temp dir first, and the still-running extraction would
+    // re-create and fill it with nothing left to clean it up afterward.
     if (scope === "whole_track") {
-      return analyzeTrackWholeTrack(track, tempDir);
+      return await analyzeTrackWholeTrack(track, tempDir);
     }
 
-    return analyzeTrackWindows(track, tempDir);
+    return await analyzeTrackWindows(track, tempDir);
   } finally {
     const removedBytes = await directorySize(tempDir).catch(() => 0);
     await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
