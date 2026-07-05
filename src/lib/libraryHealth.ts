@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import prisma from "./prisma";
 import {
   apiAudioFeatureTrackWhere,
@@ -592,6 +592,370 @@ export function missingTrackBpmStatus(track: any) {
   return "pending";
 }
 
+// The per-library, per-track health buckets that used to be ~35 separate
+// prisma.track.count() anti-join queries. We now compute all of them in one
+// grouped scan per library (see getActiveTrackHealthBuckets). The keys mirror
+// the fields getLibraryHealth returns, so nothing downstream has to change.
+export type ActiveTrackHealthBuckets = {
+  activeTracks: number;
+  tracksWithBpm: number;
+  bpmApi: number;
+  bpmLocal: number;
+  bpmImported: number;
+  missingBpm: number;
+  bpmNoData: number;
+  bpmFailed: number;
+  bpmExtractionFailed: number;
+  bpmAnalyzerFailed: number;
+  bpmTooShort: number;
+  bpmPendingBackfill: number;
+  audioFeaturesComplete: number;
+  audioFeaturesMissing: number;
+  audioFeaturesApi: number;
+  audioFeaturesLocal: number;
+  audioFeaturesHeuristic: number;
+  audioFeaturesPartial: number;
+  audioFeaturesNoData: number;
+  audioFeaturesFailed: number;
+  audioFeaturesExtractionFailed: number;
+  audioFeaturesAnalyzerFailed: number;
+  audioFeaturesTooShort: number;
+  tracksWithGenres: number;
+  missingGenres: number;
+  genreNoData: number;
+  genreFailed: number;
+  pendingGenreBackfill: number;
+  tracksWithPopularity: number;
+  missingPopularity: number;
+  popularityNoData: number;
+  popularityFailed: number;
+  pendingPopularityBackfill: number;
+};
+
+export function emptyActiveTrackHealthBuckets(): ActiveTrackHealthBuckets {
+  return {
+    activeTracks: 0, tracksWithBpm: 0, bpmApi: 0, bpmLocal: 0, bpmImported: 0, missingBpm: 0,
+    bpmNoData: 0, bpmFailed: 0, bpmExtractionFailed: 0, bpmAnalyzerFailed: 0, bpmTooShort: 0, bpmPendingBackfill: 0,
+    audioFeaturesComplete: 0, audioFeaturesMissing: 0, audioFeaturesApi: 0, audioFeaturesLocal: 0,
+    audioFeaturesHeuristic: 0, audioFeaturesPartial: 0, audioFeaturesNoData: 0, audioFeaturesFailed: 0,
+    audioFeaturesExtractionFailed: 0, audioFeaturesAnalyzerFailed: 0, audioFeaturesTooShort: 0,
+    tracksWithGenres: 0, missingGenres: 0, genreNoData: 0, genreFailed: 0, pendingGenreBackfill: 0,
+    tracksWithPopularity: 0, missingPopularity: 0, popularityNoData: 0, popularityFailed: 0, pendingPopularityBackfill: 0,
+  };
+}
+
+// One grouped scan of the active tracks in the given libraries, producing every
+// health bucket at once. Each boolean flag below is a verbatim port of the
+// matching *Where() helper; the parity oracle in libraryHealthParity.test.ts
+// proves, bucket-for-bucket, that these SQL predicates match the Prisma ones.
+//
+// Two rules keep the port faithful to Prisma's NULL semantics:
+//   1. Track column comparisons are written as-is, so `col = 'x'` is NULL for a
+//      NULL column exactly like Prisma's, which matters under NOT.
+//   2. Relation predicates (audioFeature/popularity `is`, tags `some`/`none`)
+//      are made total - EXISTS for genres, COALESCE(..., false) for the 1:1
+//      joins - because Prisma compiles them to IN/EXISTS subqueries that are
+//      never NULL. That is the swap that also kills the pathological anti-joins.
+export async function getActiveTrackHealthBuckets(libraryIds: string[]): Promise<Map<string, ActiveTrackHealthBuckets>> {
+  const buckets = new Map<string, ActiveTrackHealthBuckets>();
+  if (libraryIds.length === 0) return buckets;
+
+  const knownProviders = Prisma.join([...knownPopularityProviders]);
+  const knownProvidersWithNotFound = Prisma.join(["not_found", ...knownPopularityProviders]);
+  const unusableGenres = Prisma.join([...unusableGenreNames]);
+  const libraries = Prisma.join(libraryIds);
+
+  // The ~130 count() FILTER aggregates push this query's estimated cost past
+  // jit_above_cost, so Postgres JIT-compiles it (~1.7s on a 35k-track library)
+  // on every dashboard load while the actual scan is ~0.3s. SET LOCAL scopes the
+  // opt-out to this one transaction, so we skip the compile without touching the
+  // database's global jit settings. The generous timeout keeps a cold, very
+  // large library from tripping the interactive-transaction default (5s).
+  const rows = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL jit = off`;
+    return tx.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+    WITH base AS (
+      SELECT
+        t."libraryId"               AS "libraryId",
+        t."bpm"                     AS bpm,
+        t."effectiveBpm"            AS effective_bpm,
+        t."apiBpm"                  AS api_bpm,
+        t."localBpm"                AS local_bpm,
+        t."bpmSource"               AS bpm_source,
+        t."bpmAnalysisStatus"       AS bpm_analysis_status,
+        t."genreStatus"             AS genre_status,
+        t."tagsSyncedAt"            AS tags_synced_at,
+        t."popularityStatus"        AS popularity_status,
+        af."trackId"                AS af_track_id,
+        af."tempo"                  AS af_tempo,
+        af."tempoSource"            AS af_tempo_source,
+        af."energy"                 AS af_energy,
+        af."valence"                AS af_valence,
+        af."danceability"           AS af_danceability,
+        af."acousticness"           AS af_acousticness,
+        af."apiEnergy"              AS af_api_energy,
+        af."apiMood"                AS af_api_mood,
+        af."apiDanceability"        AS af_api_danceability,
+        af."apiAcousticness"        AS af_api_acousticness,
+        af."localEnergy"            AS af_local_energy,
+        af."localMood"              AS af_local_mood,
+        af."localDanceability"      AS af_local_danceability,
+        af."localAcousticness"      AS af_local_acousticness,
+        af."source"                 AS af_source,
+        af."audioFeatureSource"     AS af_source_kind,
+        af."audioFeatureStatus"     AS af_status,
+        af."audioFeatureConfidence" AS af_confidence,
+        af."energySource"           AS af_energy_source,
+        af."valenceSource"          AS af_valence_source,
+        af."danceabilitySource"     AS af_danceability_source,
+        af."acousticnessSource"     AS af_acousticness_source,
+        p."trackId"                 AS pop_track_id,
+        p."provider"                AS pop_provider,
+        p."score"                   AS pop_score,
+        g.has_usable_genre          AS has_usable_genre
+      FROM "Track" t
+      LEFT JOIN "AudioFeature" af ON af."trackId" = t."id"
+      LEFT JOIN "Popularity" p ON p."trackId" = t."id"
+      LEFT JOIN LATERAL (
+        SELECT EXISTS (
+          SELECT 1
+          FROM "_TrackTags" tt
+          JOIN "Tag" gg ON gg."id" = tt."A"
+          WHERE tt."B" = t."id"
+            AND gg."type" = 'genre'
+            AND gg."name" NOT IN (${unusableGenres})
+        ) AS has_usable_genre
+      ) g ON true
+      WHERE t."syncStatus" = 'active'
+        AND t."libraryId" IN (${libraries})
+    ),
+    core AS (
+      SELECT
+        "libraryId",
+        af_track_id,
+        af_status,
+        genre_status,
+        tags_synced_at,
+        popularity_status,
+        pop_track_id,
+        pop_provider,
+        pop_score,
+        has_usable_genre,
+        -- missingEffectiveBpmTrackWhere() (total; effectiveBpmTrackWhere is its complement)
+        ((bpm IS NULL OR bpm <= 0)
+          AND (effective_bpm IS NULL OR effective_bpm <= 0)
+          AND (api_bpm IS NULL OR api_bpm <= 0)
+          AND (local_bpm IS NULL OR local_bpm <= 0)
+          AND (af_tempo IS NULL OR af_tempo <= 0)) AS missing_effective_bpm,
+        -- localBpmSuccessSourceWhere(). The relation branch mirrors Prisma's
+        -- audioFeature-is compilation: (predicate) AND af row exists, which
+        -- keeps NULL semantics intact when this flag is later negated.
+        (local_bpm > 0
+          OR bpm_source IN ('local_essentia', 'essentia', 'aubio')
+          OR (bpm_analysis_status = 'success' AND bpm_source IN ('local_essentia', 'essentia', 'aubio'))
+          OR (((af_tempo > 0 AND af_tempo_source LIKE 'Essentia%') OR (af_tempo > 0 AND af_tempo_source LIKE 'Aubio%')) AND af_track_id IS NOT NULL)) AS bpm_local_success,
+        -- apiBpmSourceWhere() inner OR (apiBpm>0 OR bpmSource in api/deezer)
+        (api_bpm > 0 OR bpm_source IN ('api', 'deezer')) AS bpm_api_core,
+        -- bpm terminal markers: bpmAnalysisStatus column OR (tempoSource on an existing af row)
+        (bpm_analysis_status = 'no_data' OR (af_tempo_source = 'local_not_found' AND af_track_id IS NOT NULL)) AS bpm_marker_no_data,
+        (bpm_analysis_status = 'failed' OR (af_tempo_source = 'local_failed' AND af_track_id IS NOT NULL)) AS bpm_marker_failed,
+        (bpm_analysis_status = 'extraction_failed' OR (af_tempo_source = 'local_extraction_failed' AND af_track_id IS NOT NULL)) AS bpm_marker_extraction,
+        (bpm_analysis_status = 'analyzer_failed' OR (af_tempo_source = 'local_analyzer_failed' AND af_track_id IS NOT NULL)) AS bpm_marker_analyzer,
+        (bpm_analysis_status = 'too_short' OR (af_tempo_source = 'local_too_short' AND af_track_id IS NOT NULL)) AS bpm_marker_too_short,
+        -- pendingBpmBackfillTrackWhere(): status is null or non-terminal (bpmAnalysisStatuses)
+        (bpm_analysis_status IS NULL
+          OR bpm_analysis_status NOT IN ('success', 'no_data', 'failed', 'extraction_failed', 'analyzer_failed', 'too_short')) AS bpm_status_pending,
+        -- completeAudioFeatureWhere() on the joined af row (nullable on purpose)
+        (
+          (af_status IS NULL OR af_status NOT IN ('pending', 'no_data', 'extraction_failed', 'analyzer_failed', 'too_short'))
+          AND (
+            (
+              (af_local_energy >= 0 AND af_local_energy <= 1
+                AND af_local_mood >= 0 AND af_local_mood <= 1
+                AND af_local_danceability >= 0 AND af_local_danceability <= 1
+                AND af_local_acousticness >= 0 AND af_local_acousticness <= 1
+                AND af_tempo > 0)
+              AND (af_source_kind IN ('local_essentia', 'mixed')
+                OR af_energy_source = 'local_essentia' OR af_valence_source = 'local_essentia'
+                OR af_danceability_source = 'local_essentia' OR af_acousticness_source = 'local_essentia'
+                OR af_local_energy IS NOT NULL OR af_local_mood IS NOT NULL
+                OR af_local_danceability IS NOT NULL OR af_local_acousticness IS NOT NULL)
+            )
+            OR (
+              (af_api_energy >= 0 AND af_api_energy <= 1
+                AND af_api_mood >= 0 AND af_api_mood <= 1
+                AND af_api_danceability >= 0 AND af_api_danceability <= 1
+                AND af_api_acousticness >= 0 AND af_api_acousticness <= 1
+                AND af_tempo > 0)
+              AND (af_source_kind IN ('api', 'mixed')
+                OR af_energy_source = 'api' OR af_valence_source = 'api'
+                OR af_danceability_source = 'api' OR af_acousticness_source = 'api'
+                OR af_api_energy IS NOT NULL OR af_api_mood IS NOT NULL
+                OR af_api_danceability IS NOT NULL OR af_api_acousticness IS NOT NULL)
+              AND NOT (af_source IN ('not_found', 'estimated', 'Deezer BPM only')
+                OR (af_source_kind = 'local_heuristic' AND af_confidence <= 0)
+                OR (af_energy = 0.5 AND af_valence = 0.5 AND af_danceability = 0.5
+                  AND (af_source ILIKE '%Unknown Mood%' OR af_source = 'estimated' OR af_status = 'no_data')))
+            )
+            OR (
+              (af_energy >= 0 AND af_energy <= 1
+                AND af_valence >= 0 AND af_valence <= 1
+                AND af_danceability >= 0 AND af_danceability <= 1
+                AND af_acousticness >= 0 AND af_acousticness <= 1
+                AND af_tempo > 0)
+              AND NOT (af_source IN ('not_found', 'estimated', 'Deezer BPM only')
+                OR (af_source_kind = 'local_heuristic' AND af_confidence <= 0)
+                OR (af_energy = 0.5 AND af_valence = 0.5 AND af_danceability = 0.5
+                  AND (af_source ILIKE '%Unknown Mood%' OR af_source = 'estimated' OR af_status = 'no_data')))
+            )
+          )
+        ) AS complete_core,
+        -- apiAudioFeatureTrackWhere() source OR
+        (af_source_kind = 'api'
+          OR af_api_energy IS NOT NULL OR af_api_mood IS NOT NULL
+          OR af_api_danceability IS NOT NULL OR af_api_acousticness IS NOT NULL
+          OR (af_source_kind IS NULL AND af_source NOT IN ('not_found', 'estimated', 'local_not_found'))) AS af_api_marker,
+        -- localAudioFeatureTrackWhere() source OR
+        (af_local_energy IS NOT NULL OR af_local_mood IS NOT NULL
+          OR af_local_danceability IS NOT NULL OR af_local_acousticness IS NOT NULL
+          OR af_source_kind IN ('local_essentia', 'mixed')) AS af_local_marker,
+        -- heuristicAudioFeatureTrackWhere(): af row must exist
+        (af_track_id IS NOT NULL AND (
+          af_source_kind = 'local_heuristic'
+          OR af_valence_source = 'local_heuristic'
+          OR af_acousticness_source = 'local_heuristic'
+          OR af_danceability_source = 'local_heuristic'
+          OR af_local_mood IS NOT NULL OR af_local_danceability IS NOT NULL OR af_local_acousticness IS NOT NULL)) AS af_heuristic_present,
+        -- partialAudioFeatureTrackWhere() inner OR: af row must exist
+        (af_track_id IS NOT NULL AND (
+          af_status = 'partial'
+          OR af_energy IS NOT NULL OR af_valence IS NOT NULL OR af_danceability IS NOT NULL OR af_acousticness IS NOT NULL OR af_tempo IS NOT NULL
+          OR af_local_energy IS NOT NULL OR af_local_mood IS NOT NULL OR af_local_danceability IS NOT NULL OR af_local_acousticness IS NOT NULL
+          OR af_api_energy IS NOT NULL OR af_api_mood IS NOT NULL OR af_api_danceability IS NOT NULL OR af_api_acousticness IS NOT NULL)) AS af_partial_present
+      FROM base
+    ),
+    flags AS (
+      SELECT
+        "libraryId",
+        missing_effective_bpm,
+        bpm_local_success,
+        bpm_api_core,
+        bpm_marker_no_data,
+        bpm_marker_failed,
+        bpm_marker_extraction,
+        bpm_marker_analyzer,
+        bpm_marker_too_short,
+        bpm_status_pending,
+        af_status,
+        af_api_marker,
+        af_local_marker,
+        af_heuristic_present,
+        af_partial_present,
+        genre_status,
+        tags_synced_at,
+        has_usable_genre,
+        popularity_status,
+        pop_track_id,
+        pop_provider,
+        pop_score,
+        af_track_id,
+        -- completeAudioFeatureWhere() on the af row, kept nullable so that the
+        -- outer NOT in the partial bucket propagates NULL exactly like Prisma's
+        -- LEFT JOIN compilation of NOT (audioFeature is complete) does.
+        complete_core
+      FROM core
+    )
+    SELECT
+      "libraryId",
+      count(*)                                                                                   AS active_tracks,
+      count(*) FILTER (WHERE NOT missing_effective_bpm)                                          AS tracks_with_bpm,
+      count(*) FILTER (WHERE NOT missing_effective_bpm AND NOT bpm_local_success AND bpm_api_core) AS bpm_api,
+      count(*) FILTER (WHERE NOT missing_effective_bpm AND bpm_local_success)                    AS bpm_local,
+      count(*) FILTER (WHERE NOT missing_effective_bpm AND NOT bpm_local_success AND NOT bpm_api_core) AS bpm_imported,
+      count(*) FILTER (WHERE missing_effective_bpm)                                              AS missing_bpm,
+      count(*) FILTER (WHERE missing_effective_bpm AND bpm_marker_no_data)                       AS bpm_no_data,
+      count(*) FILTER (WHERE missing_effective_bpm AND (bpm_marker_failed OR bpm_marker_extraction OR bpm_marker_analyzer)) AS bpm_failed,
+      count(*) FILTER (WHERE missing_effective_bpm AND bpm_marker_extraction)                    AS bpm_extraction_failed,
+      count(*) FILTER (WHERE missing_effective_bpm AND bpm_marker_analyzer)                      AS bpm_analyzer_failed,
+      count(*) FILTER (WHERE missing_effective_bpm AND bpm_marker_too_short)                     AS bpm_too_short,
+      count(*) FILTER (WHERE missing_effective_bpm AND bpm_status_pending
+        AND NOT bpm_marker_no_data AND NOT bpm_marker_failed AND NOT bpm_marker_extraction
+        AND NOT bpm_marker_analyzer AND NOT bpm_marker_too_short)                                AS bpm_pending_backfill,
+      -- audioFeature { is: complete }  ->  (complete_core) AND af row exists
+      count(*) FILTER (WHERE complete_core AND af_track_id IS NOT NULL)                          AS af_complete,
+      -- missingAudioFeatureTrackWhere() = OR[ af null, af is (NOT complete) ]
+      count(*) FILTER (WHERE af_track_id IS NULL OR (NOT complete_core AND af_track_id IS NOT NULL)) AS af_missing,
+      count(*) FILTER (WHERE (complete_core AND af_api_marker) AND af_track_id IS NOT NULL)      AS af_api,
+      count(*) FILTER (WHERE (complete_core AND af_local_marker) AND af_track_id IS NOT NULL)    AS af_local,
+      count(*) FILTER (WHERE af_heuristic_present)                                               AS af_heuristic,
+      -- partial uses the OUTER NOT: NOT (audioFeature is complete), NULL-propagating
+      count(*) FILTER (WHERE af_partial_present AND NOT (complete_core AND af_track_id IS NOT NULL)) AS af_partial,
+      count(*) FILTER (WHERE (NOT complete_core AND af_track_id IS NOT NULL) AND af_status = 'no_data') AS af_no_data,
+      count(*) FILTER (WHERE (NOT complete_core AND af_track_id IS NOT NULL) AND (af_status = 'extraction_failed' OR af_status = 'analyzer_failed')) AS af_failed,
+      count(*) FILTER (WHERE (NOT complete_core AND af_track_id IS NOT NULL) AND af_status = 'extraction_failed') AS af_extraction_failed,
+      count(*) FILTER (WHERE (NOT complete_core AND af_track_id IS NOT NULL) AND af_status = 'analyzer_failed') AS af_analyzer_failed,
+      count(*) FILTER (WHERE (NOT complete_core AND af_track_id IS NOT NULL) AND af_status = 'too_short') AS af_too_short,
+      count(*) FILTER (WHERE has_usable_genre)                                                   AS tracks_with_genres,
+      count(*) FILTER (WHERE NOT has_usable_genre)                                               AS missing_genres,
+      count(*) FILTER (WHERE NOT has_usable_genre AND (genre_status = 'no_data' OR (genre_status IS NULL AND tags_synced_at IS NOT NULL))) AS genre_no_data,
+      count(*) FILTER (WHERE NOT has_usable_genre AND genre_status = 'failed')                   AS genre_failed,
+      count(*) FILTER (WHERE NOT has_usable_genre AND (genre_status IN ('pending', 'success') OR (genre_status IS NULL AND tags_synced_at IS NULL))) AS pending_genre_backfill,
+      count(*) FILTER (WHERE pop_track_id IS NOT NULL AND pop_provider IN (${knownProviders}) AND pop_score >= 0) AS tracks_with_popularity,
+      count(*) FILTER (WHERE pop_track_id IS NULL OR pop_provider NOT IN (${knownProviders}))    AS missing_popularity,
+      count(*) FILTER (WHERE (pop_track_id IS NULL OR pop_provider NOT IN (${knownProviders}))
+        AND (popularity_status = 'no_data' OR pop_provider = 'not_found'))                       AS popularity_no_data,
+      count(*) FILTER (WHERE (pop_track_id IS NULL OR pop_provider NOT IN (${knownProviders}))
+        AND popularity_status = 'failed')                                                        AS popularity_failed,
+      count(*) FILTER (WHERE (pop_track_id IS NULL OR pop_provider NOT IN (${knownProviders}))
+        AND (popularity_status IN ('pending', 'success')
+          OR (popularity_status IS NULL AND pop_track_id IS NULL)
+          OR (popularity_status IS NULL AND pop_track_id IS NOT NULL AND pop_provider NOT IN (${knownProvidersWithNotFound})))) AS pending_popularity_backfill
+    FROM flags
+    GROUP BY "libraryId"
+  `);
+  }, { timeout: 30_000 });
+
+  for (const row of rows) {
+    buckets.set(String(row.libraryId), {
+      activeTracks: Number(row.active_tracks),
+      tracksWithBpm: Number(row.tracks_with_bpm),
+      bpmApi: Number(row.bpm_api),
+      bpmLocal: Number(row.bpm_local),
+      bpmImported: Number(row.bpm_imported),
+      missingBpm: Number(row.missing_bpm),
+      bpmNoData: Number(row.bpm_no_data),
+      bpmFailed: Number(row.bpm_failed),
+      bpmExtractionFailed: Number(row.bpm_extraction_failed),
+      bpmAnalyzerFailed: Number(row.bpm_analyzer_failed),
+      bpmTooShort: Number(row.bpm_too_short),
+      bpmPendingBackfill: Number(row.bpm_pending_backfill),
+      audioFeaturesComplete: Number(row.af_complete),
+      audioFeaturesMissing: Number(row.af_missing),
+      audioFeaturesApi: Number(row.af_api),
+      audioFeaturesLocal: Number(row.af_local),
+      audioFeaturesHeuristic: Number(row.af_heuristic),
+      audioFeaturesPartial: Number(row.af_partial),
+      audioFeaturesNoData: Number(row.af_no_data),
+      audioFeaturesFailed: Number(row.af_failed),
+      audioFeaturesExtractionFailed: Number(row.af_extraction_failed),
+      audioFeaturesAnalyzerFailed: Number(row.af_analyzer_failed),
+      audioFeaturesTooShort: Number(row.af_too_short),
+      tracksWithGenres: Number(row.tracks_with_genres),
+      missingGenres: Number(row.missing_genres),
+      genreNoData: Number(row.genre_no_data),
+      genreFailed: Number(row.genre_failed),
+      pendingGenreBackfill: Number(row.pending_genre_backfill),
+      tracksWithPopularity: Number(row.tracks_with_popularity),
+      missingPopularity: Number(row.missing_popularity),
+      popularityNoData: Number(row.popularity_no_data),
+      popularityFailed: Number(row.popularity_failed),
+      pendingPopularityBackfill: Number(row.pending_popularity_backfill),
+    });
+  }
+
+  return buckets;
+}
+
 export async function getLibraryHealth(userId: string) {
   const metadataSettings = resolveMetadataProviderSettings(await getUserSyncSettings(userId));
   const bpmProviderMode = metadataProviderModeLabel(metadataSettings.bpm);
@@ -608,59 +972,23 @@ export async function getLibraryHealth(userId: string) {
     orderBy: [{ server: { name: "asc" } }, { name: "asc" }],
   });
 
+  // One grouped scan replaces the ~35 per-library anti-join counts we used to
+  // fire per library. Missing-record counts and the reconciliation lookup stay
+  // as their own cheap indexed queries - they never hit the pathological plan.
+  const bucketsByLibrary = await getActiveTrackHealthBuckets(libraries.map((library) => library.id));
+
   return Promise.all(libraries.map(async (library) => {
-    const active = { libraryId: library.id, syncStatus: "active" } as const;
-    const [
-      activeTracks, missingTracks, missingAlbums, missingArtists, tracksWithBpm,
-      bpmApi, bpmLocal, bpmImported, missingBpm, bpmNoData, bpmFailed, bpmExtractionFailed, bpmAnalyzerFailed, bpmTooShort, bpmPendingBackfill,
-      audioFeaturesComplete, audioFeaturesMissing, audioFeaturesApi, audioFeaturesLocal,
-      audioFeaturesHeuristic, audioFeaturesPartial, audioFeaturesNoData, audioFeaturesFailed,
-      audioFeaturesExtractionFailed, audioFeaturesAnalyzerFailed, audioFeaturesTooShort,
-      tracksWithGenres, missingGenres, genreNoData, genreFailed, pendingGenreBackfill,
-      tracksWithPopularity, missingPopularity, popularityNoData, popularityFailed, pendingPopularityBackfill,
-      lastReconciliation,
-    ] = await Promise.all([
-      prisma.track.count({ where: active }),
+    const buckets = bucketsByLibrary.get(library.id) ?? emptyActiveTrackHealthBuckets();
+    const [missingTracks, missingAlbums, missingArtists, lastReconciliation] = await Promise.all([
       prisma.track.count({ where: { libraryId: library.id, syncStatus: "missing" } }),
       prisma.album.count({ where: { libraryId: library.id, syncStatus: "missing" } }),
       prisma.artist.count({ where: { libraryId: library.id, syncStatus: "missing" } }),
-      prisma.track.count({ where: { AND: [active, effectiveBpmTrackWhere()] } }),
-      prisma.track.count({ where: { AND: [active, bpmHealthFilterWhere("api_bpm")] } }),
-      prisma.track.count({ where: { AND: [active, bpmHealthFilterWhere("local_bpm")] } }),
-      prisma.track.count({ where: { AND: [active, bpmHealthFilterWhere("imported_bpm")] } }),
-      prisma.track.count({ where: { AND: [active, missingEffectiveBpmTrackWhere()] } }),
-      prisma.track.count({ where: { AND: [active, bpmNoDataTrackWhere()] } }),
-      prisma.track.count({ where: { AND: [active, bpmFailedTrackWhere()] } }),
-      prisma.track.count({ where: { AND: [active, bpmExtractionFailedTrackWhere()] } }),
-      prisma.track.count({ where: { AND: [active, bpmAnalyzerFailedTrackWhere()] } }),
-      prisma.track.count({ where: { AND: [active, bpmTooShortTrackWhere()] } }),
-      prisma.track.count({ where: { AND: [active, pendingBpmBackfillTrackWhere()] } }),
-      prisma.track.count({ where: { AND: [active, completeAudioFeatureTrackWhere()] } }),
-      prisma.track.count({ where: { AND: [active, missingAudioFeatureTrackWhere()] } }),
-      prisma.track.count({ where: { AND: [active, apiAudioFeatureTrackWhere()] } }),
-      prisma.track.count({ where: { AND: [active, localAudioFeatureTrackWhere()] } }),
-      prisma.track.count({ where: { AND: [active, heuristicAudioFeatureTrackWhere()] } }),
-      prisma.track.count({ where: { AND: [active, partialAudioFeatureTrackWhere()] } }),
-      prisma.track.count({ where: { AND: [active, audioFeatureNoDataTrackWhere()] } }),
-      prisma.track.count({ where: { AND: [active, audioFeatureFailedTrackWhere()] } }),
-      prisma.track.count({ where: { AND: [active, audioFeatureExtractionFailedTrackWhere()] } }),
-      prisma.track.count({ where: { AND: [active, audioFeatureAnalyzerFailedTrackWhere()] } }),
-      prisma.track.count({ where: { AND: [active, audioFeatureTooShortTrackWhere()] } }),
-      prisma.track.count({ where: { AND: [active, tracksWithGenresWhere()] } }),
-      prisma.track.count({ where: { AND: [active, missingGenresWhere()] } }),
-      prisma.track.count({ where: { AND: [active, genreNoDataWhere()] } }),
-      prisma.track.count({ where: { AND: [active, genreFailedWhere()] } }),
-      prisma.track.count({ where: { AND: [active, pendingGenreBackfillWhere()] } }),
-      prisma.track.count({ where: { AND: [active, tracksWithPopularityWhere()] } }),
-      prisma.track.count({ where: { AND: [active, missingPopularityWhere()] } }),
-      prisma.track.count({ where: { AND: [active, popularityNoDataWhere()] } }),
-      prisma.track.count({ where: { AND: [active, popularityFailedWhere()] } }),
-      prisma.track.count({ where: { AND: [active, pendingPopularityBackfillWhere()] } }),
       prisma.syncLog.findFirst({
         where: { libraryId: library.id, status: "success", snapshotComplete: true, reconciliationAt: { not: null } },
         orderBy: { reconciliationAt: "desc" },
       }),
     ]);
+    const activeTracks = buckets.activeTracks;
     const latest = library.syncLogs[0] || null;
     const plexReportedTrackCount = lastReconciliation?.plexReportedTrackCount ?? null;
     const difference = plexReportedTrackCount === null ? null : activeTracks - plexReportedTrackCount;
@@ -670,7 +998,7 @@ export async function getLibraryHealth(userId: string) {
       plexReportedTrackCount,
       activeTrackCount: activeTracks,
       missingTrackCount: missingTracks,
-      bpmFailureCount: bpmFailed,
+      bpmFailureCount: buckets.bpmFailed,
       lastSyncAt: latest?.endedAt || latest?.startedAt,
     });
 
@@ -680,44 +1008,12 @@ export async function getLibraryHealth(userId: string) {
       plexLibraryId: library.plexId,
       server: library.server,
       status,
-      activeTracks,
+      ...buckets,
       missingTracks,
       missingAlbums,
       missingArtists,
-      tracksWithBpm,
-      bpmApi,
-      bpmLocal,
-      bpmImported,
-      missingBpm,
-      bpmNoData,
-      bpmFailed,
-      bpmExtractionFailed,
-      bpmAnalyzerFailed,
-      bpmTooShort,
-      bpmPendingBackfill,
-      audioFeaturesComplete,
-      audioFeaturesMissing,
-      audioFeaturesApi,
-      audioFeaturesLocal,
-      audioFeaturesHeuristic,
-      audioFeaturesPartial,
-      audioFeaturesNoData,
-      audioFeaturesFailed,
-      audioFeaturesExtractionFailed,
-      audioFeaturesAnalyzerFailed,
-      audioFeaturesTooShort,
       bpmProviderMode,
       audioFeatureProviderMode,
-      tracksWithGenres,
-      missingGenres,
-      genreNoData,
-      genreFailed,
-      pendingGenreBackfill,
-      tracksWithPopularity,
-      missingPopularity,
-      popularityNoData,
-      popularityFailed,
-      pendingPopularityBackfill,
       lastFullSyncAt: latest?.endedAt || latest?.startedAt || null,
       lastReconciliationAt: lastReconciliation?.reconciliationAt || null,
       lastSyncStatus: latest?.status || "never",

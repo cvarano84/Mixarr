@@ -1,12 +1,11 @@
 import styles from "./page.module.css";
-import Link from "next/link";
-import { BrainCircuit, Fingerprint, Gauge, HeartPulse, ListMusic, Radio, Repeat2, SlidersHorizontal, Wand2 } from "lucide-react";
+import { BrainCircuit, Fingerprint, Gauge, ListMusic, Radio, Repeat2, SlidersHorizontal, Wand2 } from "lucide-react";
 import LibrarySelector from "@/components/LibrarySelector";
 import SyncProgress from "@/components/SyncProgress";
+import LibraryHealthPanel from "@/components/LibraryHealthPanel";
 import PlexLoginButton from "@/components/PlexLoginButton";
 import { cookies } from "next/headers";
 import prisma from "@/lib/prisma";
-import { getLibraryHealth } from "@/lib/libraryHealth";
 
 const previewFeatures = [
   {
@@ -58,12 +57,10 @@ export default async function Home() {
   const sessionId = cookieStore.get("mixarr_session")?.value;
 
   let user = null;
-  let health: Awaited<ReturnType<typeof getLibraryHealth>> = [];
   if (sessionId) {
     user = await prisma.user.findUnique({
       where: { id: sessionId },
     });
-    if (user) health = await getLibraryHealth(user.id);
   }
 
   return (
@@ -76,50 +73,7 @@ export default async function Home() {
       {user ? (
         <div style={{ marginBottom: "3rem" }}>
           <SyncProgress />
-          {health.length > 0 && (() => {
-            const active = health.reduce((sum, library) => sum + library.activeTracks, 0);
-            const missing = health.reduce((sum, library) => sum + library.missingTracks, 0);
-            const bpmComplete = health.reduce((sum, library) => sum + library.tracksWithBpm, 0);
-            const bpmApi = health.reduce((sum, library) => sum + (library as any).bpmApi, 0);
-            const bpmLocal = health.reduce((sum, library) => sum + (library as any).bpmLocal, 0);
-            const bpmImported = health.reduce((sum, library) => sum + (library as any).bpmImported, 0);
-            const bpmMissing = health.reduce((sum, library) => sum + library.missingBpm, 0);
-            const bpmFailed = health.reduce((sum, library) => sum + library.bpmFailed, 0);
-            const audioComplete = health.reduce((sum, library) => sum + library.audioFeaturesComplete, 0);
-            const audioApi = health.reduce((sum, library) => sum + library.audioFeaturesApi, 0);
-            const audioLocal = health.reduce((sum, library) => sum + library.audioFeaturesLocal, 0);
-            const audioEstimated = health.reduce((sum, library) => sum + library.audioFeaturesHeuristic, 0);
-            const audioPartial = health.reduce((sum, library) => sum + library.audioFeaturesPartial, 0);
-            const audioMissing = health.reduce((sum, library) => sum + library.audioFeaturesMissing, 0);
-            const audioFailed = health.reduce((sum, library) => sum + library.audioFeaturesFailed, 0);
-            const status = health.some((library) => library.status === "error") ? "Error" : health.some((library) => library.status === "warning") ? "Warning" : "Healthy";
-            const latest = health.map((library) => library.lastFullSyncAt).filter(Boolean).sort().at(-1) || null;
-            const bpmMode = (health[0] as any).bpmProviderMode || "API + Local, API preferred";
-            const audioMode = (health[0] as any).audioFeatureProviderMode || "API + Local, API preferred";
-            return <>
-              <Link href="/settings/library-health" className={`glass-panel ${styles.healthWidget}`}>
-                <HeartPulse size={22} />
-                <div><strong>Library Health</strong><span>Active: {active.toLocaleString()} &middot; Missing: {missing.toLocaleString()} &middot; Last sync: {latest ? new Date(latest).toLocaleString() : "Never"}</span></div>
-                <b data-status={status.toLowerCase()}>{status}</b>
-              </Link>
-              <div className={styles.cardsGrid} style={{ marginBottom: "1.5rem" }}>
-                <Link href="/settings/library-health?section=bpm&filter=tracks_with_bpm" className={styles.card}>
-                  <h3>BPM / Tempo</h3>
-                  <p>{bpmComplete.toLocaleString()} / {active.toLocaleString()}</p>
-                  <p>API: {bpmApi.toLocaleString()} &middot; Local Essentia: {bpmLocal.toLocaleString()}</p>
-                  <p>Imported: {bpmImported.toLocaleString()} &middot; Missing: {bpmMissing.toLocaleString()} &middot; Failed: {bpmFailed.toLocaleString()}</p>
-                  <p>Mode: {bpmMode}</p>
-                </Link>
-                <Link href="/settings/library-health?section=audio&filter=missing_audio_features" className={styles.card}>
-                  <h3>Audio Features</h3>
-                  <p>{audioComplete.toLocaleString()} / {active.toLocaleString()}</p>
-                  <p>API: {audioApi.toLocaleString()} &middot; Local Essentia: {audioLocal.toLocaleString()}</p>
-                  <p>Estimated: {audioEstimated.toLocaleString()} &middot; Partial: {audioPartial.toLocaleString()} &middot; Missing: {audioMissing.toLocaleString()} &middot; Failed: {audioFailed.toLocaleString()}</p>
-                  <p>Mode: {audioMode}</p>
-                </Link>
-              </div>
-            </>;
-          })()}
+          <LibraryHealthPanel />
           <section className={styles.comingSoonSection} aria-labelledby="coming-soon-v2">
             <div className={styles.comingSoonHeader}>
               <div>
