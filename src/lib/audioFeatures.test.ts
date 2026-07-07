@@ -24,8 +24,20 @@ describe("audio feature health predicates", () => {
     assert.match(complete, /not_found/);
 
     const missing = JSON.stringify(missingAudioFeatureTrackWhere());
-    assert.match(missing, /NOT/);
     assert.match(missing, /audioFeature/);
+  });
+
+  it("detects missing audio features null-safely with positive predicates, not a relation NOT", () => {
+    const missing = missingAudioFeatureTrackWhere() as { OR?: unknown[] };
+    // no-row branch + incomplete-existing-row branch, both positive.
+    assert.ok(Array.isArray(missing.OR), "expected an OR of no-row and incomplete-row branches");
+    const serialized = JSON.stringify(missing);
+    // Regression guard: negating a to-one relation (NOT {audioFeature:{is:...}}, or the
+    // inner is:{NOT:...}) compiles to a NULL-propagating LEFT JOIN in Prisma and strands
+    // not_found / 0.5-placeholder rows out of backfill. The predicate must stay positive.
+    assert.doesNotMatch(serialized, /"NOT":\{"audioFeature"/);
+    assert.doesNotMatch(serialized, /"is":\{"NOT"/);
+    assert.match(serialized, /audioFeature/);
   });
 
   it("separates API, local, and heuristic feature sources", () => {
@@ -178,7 +190,9 @@ describe("audio feature health predicates", () => {
     const localSuccess = JSON.stringify(localEssentiaAudioFeatureSuccessTrackWhere("whole_track"));
 
     assert.match(partial, /partial/);
-    assert.match(partial, /NOT/);
+    // Incompleteness is matched positively (via incompleteAudioFeatureWhere) rather than a
+    // relation-level NOT, which would NULL-poison rows with null feature columns.
+    assert.doesNotMatch(partial, /"NOT":\{"audioFeature"/);
     assert.match(partial, /localEnergy/);
     assert.match(partial, /localMood/);
     assert.match(retry, /local_essentia/);

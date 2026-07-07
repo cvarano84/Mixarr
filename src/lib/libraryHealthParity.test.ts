@@ -41,6 +41,7 @@ import {
   missingAudioFeatureTrackWhere,
   partialAudioFeatureTrackWhere,
 } from "./audioFeatures";
+import { localAudioFeatureWhere } from "./localAudioFeatureEngine";
 
 // This is the parity oracle from the fix plan. It seeds one library with tracks
 // covering every health bucket plus the NULL edge cases, then computes each
@@ -141,6 +142,12 @@ const specs: TrackSpec[] = [
     audioFeature: { energy: 2, valence: 0.6, danceability: 0.6, acousticness: 0.6, tempo: 100, source: "deezer" },
   },
   { key: "af-missing-row", audioFeature: null },
+  // Adversarial: an af row exists but status/source and feature columns are NULL - the
+  // exact not_found-marker and 0.5-placeholder shapes that the old NULL-poisoned missing
+  // predicate stranded out of backfill (neither complete nor missing). They must now land
+  // in the missing bucket.
+  { key: "af-not-found-marker", audioFeature: { source: "not_found" } },
+  { key: "af-null-status-placeholder", audioFeature: { energy: 0.5, valence: 0.5, danceability: 0.5, tempo: 120 } },
   // --- Genres ---
   { key: "genre-usable", genres: ["rock"] },
   { key: "genre-usable-but-failed-status", genres: ["jazz"], track: { genreStatus: "failed" } },
@@ -287,6 +294,30 @@ describe("library health parity", { skip: hasDatabase ? false : "set DATABASE_UR
     assert.ok(oldBuckets.audioFeaturesComplete > 0 && oldBuckets.audioFeaturesMissing > 0, "expected af complete and missing");
     assert.ok(oldBuckets.tracksWithGenres > 0 && oldBuckets.missingGenres > 0, "expected genres present and missing");
     assert.ok(oldBuckets.tracksWithPopularity > 0 && oldBuckets.missingPopularity > 0, "expected popularity present and missing");
+  });
+
+  it("counts not_found and null-column placeholder rows as missing audio features", async () => {
+    const active: Prisma.TrackWhereInput = { libraryId, syncStatus: "active" };
+    const missing = await prisma.track.findMany({
+      where: { AND: [active, missingAudioFeatureTrackWhere()] },
+      select: { title: true },
+    });
+    const titles = new Set(missing.map((track) => track.title));
+    // These stranded before the null-safe fix; without it the backfill never queued them.
+    assert.ok(titles.has("af-not-found-marker"), "not_found marker row must be a backfill candidate");
+    assert.ok(titles.has("af-null-status-placeholder"), "null-column placeholder row must be a backfill candidate");
+  });
+
+  it("selects not_found and placeholder rows through the actual local backfill query", async () => {
+    // End-to-end guard on the real engine predicate (missing AND NOT terminal-local-attempt),
+    // so the { NOT: ... } exclusion can't silently strand these rows again.
+    const rows = await prisma.track.findMany({
+      where: { AND: [{ libraryId }, localAudioFeatureWhere(false, false, "whole_track")] },
+      select: { title: true },
+    });
+    const titles = new Set(rows.map((track) => track.title));
+    assert.ok(titles.has("af-not-found-marker"), "not_found marker must survive the engine candidate query");
+    assert.ok(titles.has("af-null-status-placeholder"), "placeholder row must survive the engine candidate query");
   });
 
   it("returns empty buckets for an unknown library id without querying rows", async () => {

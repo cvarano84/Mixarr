@@ -765,7 +765,11 @@ export async function getActiveTrackHealthBuckets(libraryIds: string[]): Promise
         -- pendingBpmBackfillTrackWhere(): status is null or non-terminal (bpmAnalysisStatuses)
         (bpm_analysis_status IS NULL
           OR bpm_analysis_status NOT IN ('success', 'no_data', 'failed', 'extraction_failed', 'analyzer_failed', 'too_short')) AS bpm_status_pending,
-        -- completeAudioFeatureWhere() on the joined af row (nullable on purpose)
+        -- completeAudioFeatureWhere() on the joined af row. We wrap the whole thing in
+        -- IS TRUE so a NULL feature column (acousticness, tempo, ...) collapses to a
+        -- definite FALSE instead of SQL NULL. Without it, not_found / 0.5-placeholder
+        -- rows land in neither the complete nor the missing bucket, which mirrors the
+        -- old Prisma missingAudioFeatureTrackWhere() bug that stranded them from backfill.
         (
           (af_status IS NULL OR af_status NOT IN ('pending', 'no_data', 'extraction_failed', 'analyzer_failed', 'too_short'))
           AND (
@@ -792,10 +796,10 @@ export async function getActiveTrackHealthBuckets(libraryIds: string[]): Promise
                 OR af_danceability_source = 'api' OR af_acousticness_source = 'api'
                 OR af_api_energy IS NOT NULL OR af_api_mood IS NOT NULL
                 OR af_api_danceability IS NOT NULL OR af_api_acousticness IS NOT NULL)
-              AND NOT (af_source IN ('not_found', 'estimated', 'Deezer BPM only')
+              AND (af_source IN ('not_found', 'estimated', 'Deezer BPM only')
                 OR (af_source_kind = 'local_heuristic' AND af_confidence <= 0)
                 OR (af_energy = 0.5 AND af_valence = 0.5 AND af_danceability = 0.5
-                  AND (af_source ILIKE '%Unknown Mood%' OR af_source = 'estimated' OR af_status = 'no_data')))
+                  AND (af_source ILIKE '%Unknown Mood%' OR af_source = 'estimated' OR af_status = 'no_data'))) IS NOT TRUE
             )
             OR (
               (af_energy >= 0 AND af_energy <= 1
@@ -803,13 +807,13 @@ export async function getActiveTrackHealthBuckets(libraryIds: string[]): Promise
                 AND af_danceability >= 0 AND af_danceability <= 1
                 AND af_acousticness >= 0 AND af_acousticness <= 1
                 AND af_tempo > 0)
-              AND NOT (af_source IN ('not_found', 'estimated', 'Deezer BPM only')
+              AND (af_source IN ('not_found', 'estimated', 'Deezer BPM only')
                 OR (af_source_kind = 'local_heuristic' AND af_confidence <= 0)
                 OR (af_energy = 0.5 AND af_valence = 0.5 AND af_danceability = 0.5
-                  AND (af_source ILIKE '%Unknown Mood%' OR af_source = 'estimated' OR af_status = 'no_data')))
+                  AND (af_source ILIKE '%Unknown Mood%' OR af_source = 'estimated' OR af_status = 'no_data'))) IS NOT TRUE
             )
           )
-        ) AS complete_core,
+        ) IS TRUE AS complete_core,
         -- apiAudioFeatureTrackWhere() source OR
         (af_source_kind = 'api'
           OR af_api_energy IS NOT NULL OR af_api_mood IS NOT NULL
@@ -859,9 +863,9 @@ export async function getActiveTrackHealthBuckets(libraryIds: string[]): Promise
         pop_provider,
         pop_score,
         af_track_id,
-        -- completeAudioFeatureWhere() on the af row, kept nullable so that the
-        -- outer NOT in the partial bucket propagates NULL exactly like Prisma's
-        -- LEFT JOIN compilation of NOT (audioFeature is complete) does.
+        -- completeAudioFeatureWhere() on the af row, now a definite boolean (see the
+        -- IS TRUE wrap in core). NOT complete_core and (complete_core AND af exists)
+        -- both stay null-safe, matching Prisma's NOT EXISTS(af is complete) compilation.
         complete_core
       FROM core
     )
@@ -883,12 +887,12 @@ export async function getActiveTrackHealthBuckets(libraryIds: string[]): Promise
         AND NOT bpm_marker_analyzer AND NOT bpm_marker_too_short)                                AS bpm_pending_backfill,
       -- audioFeature { is: complete }  ->  (complete_core) AND af row exists
       count(*) FILTER (WHERE complete_core AND af_track_id IS NOT NULL)                          AS af_complete,
-      -- missingAudioFeatureTrackWhere() = OR[ af null, af is (NOT complete) ]
+      -- missingAudioFeatureTrackWhere() = NOT (af is complete): af null OR NOT complete_core
       count(*) FILTER (WHERE af_track_id IS NULL OR (NOT complete_core AND af_track_id IS NOT NULL)) AS af_missing,
       count(*) FILTER (WHERE (complete_core AND af_api_marker) AND af_track_id IS NOT NULL)      AS af_api,
       count(*) FILTER (WHERE (complete_core AND af_local_marker) AND af_track_id IS NOT NULL)    AS af_local,
       count(*) FILTER (WHERE af_heuristic_present)                                               AS af_heuristic,
-      -- partial uses the OUTER NOT: NOT (audioFeature is complete), NULL-propagating
+      -- partial uses the OUTER NOT: NOT (audioFeature is complete), null-safe via complete_core
       count(*) FILTER (WHERE af_partial_present AND NOT (complete_core AND af_track_id IS NOT NULL)) AS af_partial,
       count(*) FILTER (WHERE (NOT complete_core AND af_track_id IS NOT NULL) AND af_status = 'no_data') AS af_no_data,
       count(*) FILTER (WHERE (NOT complete_core AND af_track_id IS NOT NULL) AND (af_status = 'extraction_failed' OR af_status = 'analyzer_failed')) AS af_failed,

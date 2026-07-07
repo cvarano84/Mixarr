@@ -227,6 +227,8 @@ describe("LocalAudioFeatureEngine backfill predicates", () => {
     const where = JSON.stringify(localAudioFeatureWhere(true));
     assert.match(where, /local_essentia/);
     assert.match(where, /local_heuristic/);
+    // Reprocess still covers missing/no-row tracks via the null-safe missing predicate,
+    // whose no-row branch is a literal {audioFeature:null}.
     assert.match(where, /"audioFeature":null/);
   });
 

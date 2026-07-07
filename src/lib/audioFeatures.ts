@@ -228,9 +228,11 @@ export function hasCompleteEffectiveAudioFeatures(trackOrFeature: any, settings:
   return getEffectiveAudioFeatures(trackOrFeature, settings).complete;
 }
 
+const placeholderSources = ["not_found", "estimated", "Deezer BPM only"] as const;
+
 export const placeholderAudioFeatureWhere: Prisma.AudioFeatureWhereInput = {
   OR: [
-    { source: { in: ["not_found", "estimated", "Deezer BPM only"] } },
+    { source: { in: [...placeholderSources] } },
     { audioFeatureSource: "local_heuristic", audioFeatureConfidence: { lte: 0 } },
     {
       AND: [
@@ -242,6 +244,43 @@ export const placeholderAudioFeatureWhere: Prisma.AudioFeatureWhereInput = {
             { source: { contains: "Unknown Mood", mode: "insensitive" } },
             { source: "estimated" },
             { audioFeatureStatus: "no_data" },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+// Null-safe negation of placeholderAudioFeatureWhere: TRUE unless the row is *definitely* a
+// placeholder. We spell out NOT-each-disjunct positively (with explicit IS NULL escapes)
+// because Prisma compiles { NOT: placeholderAudioFeatureWhere } over the nullable source /
+// audioFeatureSource columns to a NULL-propagating predicate, which wrongly drops genuinely
+// complete rows (e.g. Deezer-sourced final values with audioFeatureSource NULL) out of
+// completeAudioFeatureWhere(). The SQL side uses `(placeholder) IS NOT TRUE` for the same reason.
+export const nonPlaceholderAudioFeatureWhere: Prisma.AudioFeatureWhereInput = {
+  AND: [
+    // NOT (source in placeholder sources)
+    { OR: [{ source: null }, { source: { notIn: [...placeholderSources] } }] },
+    // NOT (local_heuristic AND confidence <= 0)
+    {
+      OR: [
+        { audioFeatureSource: null },
+        { audioFeatureSource: { not: "local_heuristic" } },
+        { audioFeatureConfidence: null },
+        { audioFeatureConfidence: { gt: 0 } },
+      ],
+    },
+    // NOT (0.5/0.5/0.5 neutral triple carrying an unknown-mood / estimated / no_data marker)
+    {
+      OR: [
+        { energy: null }, { energy: { not: 0.5 } },
+        { valence: null }, { valence: { not: 0.5 } },
+        { danceability: null }, { danceability: { not: 0.5 } },
+        {
+          AND: [
+            { OR: [{ source: null }, { NOT: { source: { contains: "Unknown Mood", mode: "insensitive" } } }] },
+            { OR: [{ source: null }, { source: { not: "estimated" } }] },
+            { OR: [{ audioFeatureStatus: null }, { audioFeatureStatus: { not: "no_data" } }] },
           ],
         },
       ],
@@ -321,8 +360,8 @@ export function completeAudioFeatureWhere(): Prisma.AudioFeatureWhereInput {
       {
         OR: [
           { AND: [validLocalAudioFeatureFieldsWhere, localEssentiaAudioFeatureMarkerWhere] },
-          { AND: [validApiAudioFeatureFieldsWhere, apiAudioFeatureMarkerWhere, { NOT: placeholderAudioFeatureWhere }] },
-          { AND: [validFinalAudioFeatureFieldsWhere, { NOT: placeholderAudioFeatureWhere }] },
+          { AND: [validApiAudioFeatureFieldsWhere, apiAudioFeatureMarkerWhere, nonPlaceholderAudioFeatureWhere] },
+          { AND: [validFinalAudioFeatureFieldsWhere, nonPlaceholderAudioFeatureWhere] },
         ],
       },
     ],
@@ -333,11 +372,75 @@ export function completeAudioFeatureTrackWhere(): Prisma.TrackWhereInput {
   return { audioFeature: { is: completeAudioFeatureWhere() } };
 }
 
+// A unit-range field (0..1) is "not valid" when it is NULL or outside the range.
+// We spell this out positively (rather than NOT { gte, lte }) so it stays a definite
+// boolean even for NULL columns - a NOT over a nullable column evaluates to SQL NULL,
+// which is exactly the trap that stranded not_found / placeholder rows from backfill.
+function invalidUnitFieldWhere(field: keyof Prisma.AudioFeatureWhereInput): Prisma.AudioFeatureWhereInput {
+  return { OR: [{ [field]: null }, { [field]: { lt: 0 } }, { [field]: { gt: 1 } }] } as Prisma.AudioFeatureWhereInput;
+}
+
+const invalidTempoWhere: Prisma.AudioFeatureWhereInput = { OR: [{ tempo: null }, { tempo: { lte: 0 } }] };
+
+// Each source group is complete only if all of its unit fields are valid and tempo > 0.
+// Valid fields imply the group's source marker (a non-null localEnergy is itself a marker),
+// so "group not complete" reduces to "some field invalid" - no marker negation needed.
+const localGroupIncompleteWhere: Prisma.AudioFeatureWhereInput = {
+  OR: [
+    invalidUnitFieldWhere("localEnergy"),
+    invalidUnitFieldWhere("localMood"),
+    invalidUnitFieldWhere("localDanceability"),
+    invalidUnitFieldWhere("localAcousticness"),
+    invalidTempoWhere,
+  ],
+};
+const apiGroupIncompleteWhere: Prisma.AudioFeatureWhereInput = {
+  OR: [
+    invalidUnitFieldWhere("apiEnergy"),
+    invalidUnitFieldWhere("apiMood"),
+    invalidUnitFieldWhere("apiDanceability"),
+    invalidUnitFieldWhere("apiAcousticness"),
+    invalidTempoWhere,
+  ],
+};
+const finalGroupIncompleteWhere: Prisma.AudioFeatureWhereInput = {
+  OR: [
+    invalidUnitFieldWhere("energy"),
+    invalidUnitFieldWhere("valence"),
+    invalidUnitFieldWhere("danceability"),
+    invalidUnitFieldWhere("acousticness"),
+    invalidTempoWhere,
+  ],
+};
+
+// The exact, null-safe complement of completeAudioFeatureWhere() on an existing af row.
+// complete = statusUsable AND (local OR api OR final); api/final also require NOT placeholder.
+// Negating that (and folding in that valid fields imply the marker) gives:
+//   statusInvalid
+//   OR (localIncomplete AND placeholder)
+//   OR (localIncomplete AND apiIncomplete AND finalIncomplete)
+// Every leaf is a positive predicate, so it never evaluates to SQL NULL.
+export function incompleteAudioFeatureWhere(): Prisma.AudioFeatureWhereInput {
+  return {
+    OR: [
+      { audioFeatureStatus: { in: [...invalidCompleteAudioFeatureStatuses] } },
+      { AND: [localGroupIncompleteWhere, placeholderAudioFeatureWhere] },
+      { AND: [localGroupIncompleteWhere, apiGroupIncompleteWhere, finalGroupIncompleteWhere] },
+    ],
+  };
+}
+
 export function missingAudioFeatureTrackWhere(): Prisma.TrackWhereInput {
+  // A track is missing audio features when it has no AudioFeature row, or its row is
+  // not complete. We can't express the second half as NOT(row is complete): Prisma
+  // compiles a negated to-one relation filter to a LEFT JOIN whose nullable columns
+  // propagate SQL NULL under NOT, so rows with a partial row (not_found markers, 0.5
+  // placeholders) silently drop out. Instead we match the incompleteness positively
+  // via incompleteAudioFeatureWhere(), which compiles to EXISTS(...) and is null-safe.
   return {
     OR: [
       { audioFeature: null },
-      { audioFeature: { is: { NOT: completeAudioFeatureWhere() } } },
+      { audioFeature: { is: incompleteAudioFeatureWhere() } },
     ],
   };
 }
@@ -409,13 +512,16 @@ export function heuristicAudioFeatureTrackWhere(): Prisma.TrackWhereInput {
 }
 
 export function partialAudioFeatureTrackWhere(): Prisma.TrackWhereInput {
+  // A partial row exists, is not complete, and carries at least one feature value. We match
+  // incompleteness via the positive incompleteAudioFeatureWhere() inside a single `is` (so it
+  // compiles to EXISTS and stays null-safe) instead of { NOT: completeAudioFeatureTrackWhere() },
+  // whose relation-level NOT drops rows with NULL feature columns.
   return {
-    AND: [
-      { audioFeature: { isNot: null } },
-      { NOT: completeAudioFeatureTrackWhere() },
-      {
-        audioFeature: {
-          is: {
+    audioFeature: {
+      is: {
+        AND: [
+          incompleteAudioFeatureWhere(),
+          {
             OR: [
               { audioFeatureStatus: "partial" },
               { energy: { not: null } },
@@ -433,9 +539,9 @@ export function partialAudioFeatureTrackWhere(): Prisma.TrackWhereInput {
               { apiAcousticness: { not: null } },
             ],
           },
-        },
+        ],
       },
-    ],
+    },
   };
 }
 
